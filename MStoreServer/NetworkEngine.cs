@@ -35,6 +35,9 @@ namespace MStoreServer
             }
                 
 
+            /// <summary>
+            /// Disposes client
+            /// </summary>
             public void Dispose()
             {
                 if (disposed) return;
@@ -44,6 +47,11 @@ namespace MStoreServer
                 disposed = true;
             }
 
+            /// <summary>
+            /// Low level string data send ( without any checks or sth )
+            /// </summary>
+            /// <param name="data">String to send</param>
+            /// <returns></returns>
             protected bool Send_LowLevel(string data)
             {
                 byte[] sendBytes = Encoding.UTF8.GetBytes(data);
@@ -51,6 +59,11 @@ namespace MStoreServer
                 return Send_LowLevel(sendBytes);
             }
 
+            /// <summary>
+            /// Low level byte array data send ( without any checks or sth )
+            /// </summary>
+            /// <param name="data">Byte array of data</param>
+            /// <returns></returns>
             protected bool Send_LowLevel(byte[] data)
             {
                 if (!active) return false;
@@ -85,6 +98,12 @@ namespace MStoreServer
             }
 
             const int maxPacketSize = 255;
+            /// <summary>
+            /// Packet send ( messageCode, size and data )
+            /// </summary>
+            /// <param name="data">Byte array to send</param>
+            /// <param name="messageCode">Message code string ( 5 chars )</param>
+            /// <param name="requireConfirmation">If true, it's requeired for user to send confirmation packet ( reallllllyyyy sloooow )</param>
             public void Send(byte[] data, string messageCode, bool requireConfirmation = false)
             {
                 if (messageCode.Length != 5 && messageCode.Length != 0)
@@ -182,10 +201,10 @@ namespace MStoreServer
             }
 
             /// <summary>
-            /// Send data to client
+            /// Send packet to user ( message code, size and data )
             /// </summary>
             /// <param name="data">Data to send</param>
-            /// <param name="messageCode">5 digit message code</param>
+            /// <param name="messageCode">5 chars message code</param>
             public void Send(string data, string messageCode)
             {
                 if(messageCode.Length != 5)
@@ -250,6 +269,14 @@ namespace MStoreServer
             }
 
             string __ReceiveData = "";
+            /// <summary>
+            /// Receives data ( with size )
+            /// </summary>
+            /// <param name="length">Lenght of data to receive, -2 to get size from stream</param>
+            /// <param name="forceReceive">If true, skip waiting time when packet is fragmented ( High CPU usage )</param>
+            /// <param name="looping">If true, the function is looping</param>
+            /// <param name="timeout">Receive timeout</param>
+            /// <returns></returns>
             protected string Receive_LowLevel(int length, bool forceReceive, bool looping, int timeout = -1)
             {
                 if (!active) return "\0";
@@ -433,6 +460,13 @@ namespace MStoreServer
                 return returnData;
             }
 
+            /// <summary>
+            /// Receives data and clears old data
+            /// </summary>
+            /// <param name="clearReceive">If true, clears old receive buffer</param>
+            /// <param name="forceReceive">If true, skip waiting time when packet is fragmented ( High CPU usage )</param>
+            /// <param name="looping">If true, the function is looping</param>
+            /// <param name="timeout">Receive timeout</param>
             protected void Receive(bool forceReceive, bool looping, int timeout = -1, bool clearReceive = true)
             {
                 Debug.Log("Starting to receive");
@@ -449,6 +483,10 @@ namespace MStoreServer
                 Receive(false, true);
             }
 
+            /// <summary>
+            /// Stops receiving thread and receives data
+            /// </summary>
+            /// <param name="timeout">Receive timeout ( -1 = infinite )</param>
             public void ForceReceive(int timeout = -1)
             {
                 DataFunction functionBackup = dataReceivedFunction;
@@ -465,6 +503,10 @@ namespace MStoreServer
                 
             }
 
+            /// <summary>
+            /// Reads data from string buffer and clears it
+            /// </summary>
+            /// <returns>Readed data</returns>
             public string ReadData()
             {
                 if(!socket.Connected)
