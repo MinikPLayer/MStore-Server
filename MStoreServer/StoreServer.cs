@@ -454,7 +454,9 @@ namespace MStoreServer
         }
 
 
-
+        /// <summary>
+        /// Generates new user token
+        /// </summary>
         const int tokenLenght = 32;
         private string GenerateToken()
         {
@@ -474,6 +476,11 @@ namespace MStoreServer
             return token;
         }
 
+        /// <summary>
+        /// Adds new user to list
+        /// </summary>
+        /// <param name="userCredentials"></param>
+        /// <param name="client"></param>
         private void AddUser(UserCredentials userCredentials, NetworkEngine.Client client)
         {
             //Mutex mtx = new Mutex();
@@ -483,12 +490,22 @@ namespace MStoreServer
             }
         }
 
+        /// <summary>
+        /// [Temporary] Adds some free games to new user's account
+        /// </summary>
+        /// <param name="user"></param>
         public void AddNewUserGames(User user)
         {
             user.games.Add(games[0]);
             user.games.Add(games[1]);
         }
 
+        /// <summary>
+        /// Registers new user
+        /// </summary>
+        /// <param name="client"></param>
+        /// <param name="user"></param>
+        /// <returns></returns>
         public RegisterStatus RegisterUser(NetworkEngine.Client client, out User user)
         {
             user = null;
@@ -538,6 +555,11 @@ namespace MStoreServer
             return false;
         }
 
+        /// <summary>
+        /// Finds user by credentials
+        /// </summary>
+        /// <param name="userCredentials"></param>
+        /// <returns></returns>
         User FindUser(UserCredentials userCredentials)
         {
             int usersCount = 0;
@@ -554,6 +576,12 @@ namespace MStoreServer
             return null;
         }
 
+        /// <summary>
+        /// Logs user
+        /// </summary>
+        /// <param name="client"></param>
+        /// <param name="user"></param>
+        /// <returns></returns>
         public LoginStatus LogUser(NetworkEngine.Client client, out User user)
         {
             Debug.Log("LogUser");
@@ -625,6 +653,10 @@ namespace MStoreServer
             }
         }
 
+        /// <summary>
+        /// Thread for managing new user adding
+        /// </summary>
+        /// <param name="client"></param>
         private void AddClient_Thread(NetworkEngine.Client client)
         {
             User user = null;
@@ -652,12 +684,21 @@ namespace MStoreServer
             Debug.Log("Client successfully added", ConsoleColor.Blue);
         }
 
+        /// <summary>
+        /// Starts AddClient thread
+        /// </summary>
+        /// <param name="client"></param>
         public void AddClient(NetworkEngine.Client client)
         {
             Thread addClientThread = new Thread(() => AddClient_Thread(client));
             addClientThread.Start();
         }
 
+        /// <summary>
+        /// Loads games from file
+        /// </summary>
+        /// <param name="configFilePath">File to load from</param>
+        /// <returns></returns>
         public bool LoadGamesFromFile(string configFilePath)
         {
             games = new List<Game>();
@@ -740,6 +781,9 @@ namespace MStoreServer
             return true;
         }
 
+        /// <summary>
+        /// Writes games info in console
+        /// </summary>
         void DisplayGames()
         {
             Console.WriteLine("Games: ");
@@ -749,6 +793,11 @@ namespace MStoreServer
             }
         }
 
+        /// <summary>
+        /// Deletes spaces
+        /// </summary>
+        /// <param name="line">String to remove spaces from</param>
+        /// <returns>String without spaces</returns>
         private string DeleteSpaces(string line)
         {
             for(int i = 0;i<line.Length;i++)
@@ -763,6 +812,10 @@ namespace MStoreServer
             return line;
         }
 
+        /// <summary>
+        /// Parses one line from config
+        /// </summary>
+        /// <param name="line">Line to parse</param>
         private void ParseConfigLine(string line)
         {
             line = DeleteSpaces(line);
@@ -784,6 +837,9 @@ namespace MStoreServer
         }
 
         const string configDir = "config.ini";
+        /// <summary>
+        /// Loads config from configDir
+        /// </summary>
         private void LoadConfig()
         {
             if(!File.Exists(configDir))
@@ -803,6 +859,9 @@ namespace MStoreServer
 
         int port = 5567;
 
+        /// <summary>
+        /// Loads config, Loads games and starts New client thread
+        /// </summary>
         public StoreServer()
         {
             users = new List<User>();
