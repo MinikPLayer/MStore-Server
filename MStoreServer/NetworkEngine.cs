@@ -66,7 +66,7 @@ namespace MStoreServer
             /// <returns></returns>
             protected bool Send_LowLevel(byte[] data)
             {
-                if (!active) return false;
+                if (!active || disposed) return false;
                 NetworkStream stream;
                 try
                 {
@@ -137,6 +137,7 @@ namespace MStoreServer
                     }
                     else
                     {
+                        Debug.Log("Setting size to 0");
                         size = 0;
                     }
 
@@ -279,7 +280,7 @@ namespace MStoreServer
             /// <returns></returns>
             protected string Receive_LowLevel(int length, bool forceReceive, bool looping, int timeout = -1)
             {
-                if (!active) return "\0";
+                if (!active || disposed) return "\0";
                 try
                 {
                     while (socket == null)

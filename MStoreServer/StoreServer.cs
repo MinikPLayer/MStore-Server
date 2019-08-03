@@ -111,20 +111,25 @@ namespace MStoreServer
 
         public class Game
         {
-            public string name = "";
+            public string name = "\0";
             public Int64 id = -1;
 
-            public string path = "";
+            public string path = "\0";
+            public string filename = "\0";
+
+            public string execName = "\0";
 
             public Price price;
 
 
-            public Game(string _name = "", Int64 _id = -1, string _path = "", Price _price = default(Price))
+            public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0")
             {
                 name = _name;
                 id = _id;
                 path = _path;
                 price = _price;
+
+                filename = _filename;
             }
         }
 
@@ -134,10 +139,10 @@ namespace MStoreServer
             public NetworkEngine.Client socket = null;
             public List<Game> games;
 
-            public string userName = "";
-            public string password = "";
+            public string userName = "\0";
+            public string password = "\0";
 
-            public string token = "";
+            public string token = "\0";
 
             public Int64 id = -1;
 
@@ -164,6 +169,24 @@ namespace MStoreServer
                 login = userLogin;
                 password = userPass;
             }
+        }
+
+        public static bool CheckIfUserHaveGame(User user, Game game)
+        {
+            if(user == null || game == null)
+            {
+                return false;
+            }
+
+            for(int i = 0;i<user.games.Count;i++)
+            {
+                if(user.games[i].id == game.id)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -220,6 +243,10 @@ namespace MStoreServer
             Debug.Log("Game price: " + game.price.GetPriceStr(GetUserCurrency(user)));
             info += "\n";
             info += game.path;
+            info += "\n";
+            info += game.filename;
+            info += "\n";
+            info += game.execName;
             info += "\n";
 
             return info;
@@ -336,7 +363,7 @@ namespace MStoreServer
         /// </summary>
         /// <param name="id"></param>
         /// <returns></returns>
-        public Game FindGame(Int64 id)
+        public static Game FindGame(Int64 id)
         {
             for(int i = 0;i<games.Count;i++)
             {
@@ -443,7 +470,7 @@ namespace MStoreServer
         /// </summary>
         /// <param name="token"></param>
         /// <returns></returns>
-        private User FindToken(string token)
+        public static User FindUserByToken(string token)
         {
             for(int i = 0;i<users.Count;i++)
             {
@@ -454,10 +481,11 @@ namespace MStoreServer
         }
 
 
+
+        const int tokenLenght = 32;
         /// <summary>
         /// Generates new user token
         /// </summary>
-        const int tokenLenght = 32;
         private string GenerateToken()
         {
             string token = "";
@@ -471,7 +499,7 @@ namespace MStoreServer
                 }
 
                 Debug.Log("Token: \"" + token + "\"");
-            } while (FindToken(token) != null);
+            } while (FindUserByToken(token) != null);
 
             return token;
         }
@@ -612,6 +640,11 @@ namespace MStoreServer
                 else
                 {
                     Debug.LogError("Bad command " + command);
+                    if(!client.socket.Connected)
+                    {
+                        client.Dispose();
+                        return LoginStatus.clientDisconnected;
+                    }
                     return LoginStatus.badCommand;
                 }
             }
@@ -750,6 +783,12 @@ namespace MStoreServer
                                 case "path":
                                     games[games.Count - 1].path = data;
                                     break;
+                                case "file":
+                                    games[games.Count - 1].filename = data;
+                                    break;
+                                case "exec":
+                                    games[games.Count - 1].execName = data;
+                                    break;
                                 default:
                                     NetworkEngine.WriteError("Category " + category + " not found, error in file on line " + (i+1).ToString());
                                     return false;
@@ -857,7 +896,8 @@ namespace MStoreServer
                 
         }
 
-        int port = 5567;
+        int port = 15332;
+        int downloadEnginePort = 5592;
 
         /// <summary>
         /// Loads config, Loads games and starts New client thread
@@ -873,6 +913,8 @@ namespace MStoreServer
             Debug.Log("Starting server on port " + port + "...");
             socket = new NetworkEngine(port);
             socket.addUserFunction = new NetworkEngine.NewClientFunction(AddClient);
+
+            DownloadsManager downloadsManager = new DownloadsManager(downloadEnginePort);
         }
     }
 }
