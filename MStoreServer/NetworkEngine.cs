@@ -278,7 +278,7 @@ namespace MStoreServer
             /// <param name="looping">If true, the function is looping</param>
             /// <param name="timeout">Receive timeout</param>
             /// <returns></returns>
-            protected string Receive_LowLevel(int length, bool forceReceive, bool looping, int timeout = -1)
+            public string Receive_LowLevel(int length, bool forceReceive, bool looping, int timeout = -1)
             {
                 if (!active || disposed) return "\0";
                 try
@@ -405,6 +405,7 @@ namespace MStoreServer
                                     return "\0";
                                 }
                             }
+                            Debug.Log("Data received: " + __ReceiveData);
                         }
                         catch (ObjectDisposedException e)
                         {
@@ -507,16 +508,71 @@ namespace MStoreServer
             /// <summary>
             /// Reads data from string buffer and clears it
             /// </summary>
-            /// <returns>Readed data</returns>
-            public string ReadData()
+            /// <param name="bytesToRead">-1 to infinite, any other to read only specified amount of chars</param>
+            /// <returns></returns>
+            public string ReadData(int bytesToRead = -1)
             {
                 if(!socket.Connected)
                 {
                     active = false;
                 }
 
-                string data = receiveData;
-                receiveData = "";
+                //string data = receiveData;
+                //receiveData = "";
+                string data = "";
+                if(bytesToRead >= receiveData.Length || bytesToRead == -1)
+                {
+                    data = receiveData;
+
+                    receiveData = "";
+                }
+                else
+                {
+                    data = receiveData.Remove(bytesToRead);
+                    receiveData = receiveData.Remove(0, bytesToRead);
+                }
+
+                return data;
+            }
+
+            /// <summary>
+            /// Reads data until reaches endingChar and returns string WITHOUT it. If char is not present, returns full string
+            /// </summary>
+            /// <param name="endingChar"></param>
+            /// <returns></returns>
+            public string ReadData(char endingChar)
+            {
+                if (!socket.Connected)
+                {
+                    active = false;
+                }
+
+                //string data = receiveData;
+                //receiveData = "";
+                string data = "";
+
+                int index = -1;
+                for(int i = 0;i<receiveData.Length;i++)
+                {
+                    if(receiveData[i] == endingChar)
+                    {
+                        index = i;
+                        break;
+                    }
+
+                    
+                }
+                if (index != -1)
+                {
+                    data = receiveData.Remove(index);
+                    receiveData = receiveData.Remove(0, index);
+                }
+                else
+                {
+                    data = receiveData;
+                    receiveData = "";
+                }
+
                 return data;
             }
 

@@ -219,6 +219,7 @@ namespace MStoreServer
                     
 
                     UploadStatus status = SendFile(DownloadsManager.downloadFilesDirectory + game.filename, true, false);
+
                     switch (status)
                     {
                         case UploadStatus.success:

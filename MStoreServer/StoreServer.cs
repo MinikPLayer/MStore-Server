@@ -9,6 +9,8 @@ using System.Net.Sockets;
 
 using System.Threading;
 
+using System.IO.Compression;
+
 namespace MStoreServer
 {
     public class StoreServer
@@ -119,6 +121,9 @@ namespace MStoreServer
 
             public string execName = "\0";
 
+            public Size diskSize = new Size(-1);
+            public Size downloadSize = new Size(-1);
+
             public Price price;
 
 
@@ -130,6 +135,44 @@ namespace MStoreServer
                 price = _price;
 
                 filename = _filename;
+            }
+
+            public struct Size
+            {
+                public long bytes;
+
+                public Size(long _bytes)
+                {
+                    bytes = _bytes;
+                }
+
+                static string[] sizeSuffixes = { "B", "KB", "MB", "GB", "TB", "PB" };
+                public override string ToString()
+                {
+                    int level = 0;
+                    long __bytes = bytes;
+
+                    while (__bytes > 1024)
+                    {
+                        __bytes /= 1024;
+                        level++;
+                    }
+
+                    if (level >= sizeSuffixes.Length)
+                    {
+                        return bytes.ToString();
+                    }
+
+                    return __bytes.ToString() + sizeSuffixes[level];
+
+
+                }
+
+                public static implicit operator Size(long data)
+                {
+                    return new Size(data);
+                }
+
             }
         }
 
@@ -248,6 +291,13 @@ namespace MStoreServer
             info += "\n";
             info += game.execName;
             info += "\n";
+
+            //Size
+            info += game.downloadSize.bytes.ToString();
+            info += "\n";
+            info += game.diskSize.bytes.ToString();
+            info += "\n";
+            
 
             return info;
             
@@ -422,7 +472,7 @@ namespace MStoreServer
 
 
 
-            string username = client.ReadData();
+            string username = client.ReadData('\n');
             Debug.Log("Username: " + username);
 
             //client.Send("N");
@@ -432,7 +482,7 @@ namespace MStoreServer
             }
 
             client.ForceReceive();
-            string password = client.ReadData();
+            string password = client.ReadData('\n');
             Debug.Log("Password: " + password);
 
             return new UserCredentials(username, password);
@@ -618,7 +668,7 @@ namespace MStoreServer
             while (true)
             {
                 client.ForceReceive();
-                string command = client.ReadData();
+                string command = client.ReadData(5);
                 Debug.Log("Command: " + command);
                 if (command == "REGIS")
                 {
@@ -727,6 +777,32 @@ namespace MStoreServer
             addClientThread.Start();
         }
 
+        private void CalculateGamesSizes()
+        {
+            for(int i = 0;i<games.Count;i++)
+            {
+                string __path = DownloadsManager.downloadFilesDirectory + games[i].filename;
+                if (File.Exists(__path))
+                {
+                    FileInfo info = new FileInfo(__path);
+                    games[i].downloadSize = info.Length;
+
+                    Debug.Log(games[i].name + " download size: " + games[i].downloadSize);
+
+                    ZipArchive archive = ZipFile.Open(__path, ZipArchiveMode.Read);
+
+                    long sizeOnDisk = 0;
+                    for(int j = 0;j<archive.Entries.Count;j++)
+                    {
+                        sizeOnDisk += archive.Entries[j].Length;
+                    }
+
+                    games[i].diskSize = sizeOnDisk;
+                    Debug.Log(games[i].name + " disk size: " + games[i].diskSize);
+                }
+            }
+        }
+
         /// <summary>
         /// Loads games from file
         /// </summary>
@@ -816,6 +892,8 @@ namespace MStoreServer
                         break;
                 }
             }
+
+            CalculateGamesSizes();
 
             return true;
         }
