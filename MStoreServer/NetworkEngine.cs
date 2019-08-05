@@ -576,14 +576,17 @@ namespace MStoreServer
                 return data;
             }
 
-            public Client(TcpClient client, bool createReceivingThread = true)
+            public Client(TcpClient client, bool createReceivingThread = true, bool startReceivingThread = true)
             {
                 socket = client;
 
                 if (createReceivingThread)
                 {
                     thread = new Thread(() => Receive_LowLevel(-2, false, true));
-                    thread.Start();
+                    if (startReceivingThread)
+                    {
+                        thread.Start();
+                    }
                 }
 
                 Send("WP", "CMMND"); // Welcome packet
@@ -801,7 +804,7 @@ namespace MStoreServer
             {
                 Console.WriteLine("Waiting for connection...");
 
-                Client client = new Client(socket.AcceptTcpClient());
+                Client client = new Client(socket.AcceptTcpClient(), true, false);
                 Debug.Log("Connection incoming");
                 if(client != null)
                 {

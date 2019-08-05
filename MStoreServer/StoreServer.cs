@@ -468,21 +468,26 @@ namespace MStoreServer
         /// <returns></returns>
         public UserCredentials GetClientCredentials(NetworkEngine.Client client)
         {
-            client.ForceReceive();
+            //client.ForceReceive();
 
 
 
-            string username = client.ReadData('\n');
+            //string username = client.ReadData('\n');
+            Debug.Log("Waiting for username...");
+            string username = client.Receive_LowLevel(-2, false, false);
             Debug.Log("Username: " + username);
 
             //client.Send("N");
+            Debug.Log("Sending N to client");
             if (!Send(client, "N", "CMMND"))
             {
                 return new UserCredentials("NR", "-");//LoginStatus.unknownError;
             }
 
-            client.ForceReceive();
-            string password = client.ReadData('\n');
+            //client.ForceReceive();
+            //string password = client.ReadData('\n');
+            Debug.Log("Waiting for password...");
+            string password = client.Receive_LowLevel(-2, false, false);
             Debug.Log("Password: " + password);
 
             return new UserCredentials(username, password);
@@ -667,8 +672,9 @@ namespace MStoreServer
 
             while (true)
             {
-                client.ForceReceive();
-                string command = client.ReadData(5);
+                //client.ForceReceive();
+                //string command = client.ReadData(5);
+                string command = client.Receive_LowLevel(-2, false, false);
                 Debug.Log("Command: " + command);
                 if (command == "REGIS")
                 {
@@ -762,8 +768,12 @@ namespace MStoreServer
             }
 
             Send(client, "LS:OK", "CMMND");
+
+            
             
             client.dataReceivedFunction = ClientDataReceived;
+
+            client.thread.Start();
             Debug.Log("Client successfully added", ConsoleColor.Blue);
         }
 
