@@ -192,7 +192,7 @@ namespace MStoreServer
 
             public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null)
             {
-                games = new List<Game>();
+                games = _games;
                 id = _id;
                 userName = _userName;
                 password = _password;
@@ -564,13 +564,17 @@ namespace MStoreServer
         /// </summary>
         /// <param name="userCredentials"></param>
         /// <param name="client"></param>
-        private void AddUser(UserCredentials userCredentials, NetworkEngine.Client client)
+        /// <returns>User info</returns>
+        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client)
         {
+            User user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client);
             //Mutex mtx = new Mutex();
             lock (usersListLock)
             {
-                users.Add(new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client));
+                users.Add(user);
             }
+
+            return user;
         }
 
         /// <summary>
@@ -581,6 +585,35 @@ namespace MStoreServer
         {
             user.games.Add(games[0]);
             user.games.Add(games[1]);
+        }
+
+        private string CreateUserDataInFileFormat(User user)
+        {
+            string userData = "+user" + "\n";
+            userData += "-name:" + user.userName + "\n";
+            userData += "-password:" + user.password + "\n";
+            userData += "-games:" + "\n";
+            for(int i = 0;i<user.games.Count;i++)
+            {
+                userData += user.games[i].id.ToString() + "\n";
+            }
+            userData += '\n';
+
+
+            return userData;
+        }
+
+        private void AddUserToFile(User user)
+        {
+            if(!File.Exists(usersConfigDir))
+            {
+                Debug.LogError("Users config dir doesn't exist!");
+                return;
+            }
+
+            string userData = CreateUserDataInFileFormat(user);
+
+            File.AppendAllText(usersConfigDir, userData);
         }
 
         /// <summary>
@@ -603,7 +636,8 @@ namespace MStoreServer
             User foundUser = FindUser(userCredentials);
             if(foundUser == null)
             {
-                AddUser(userCredentials, client);
+                user = AddUser(userCredentials, client);
+               
                 Debug.Log("Registered user " + userCredentials.login + " with password: " + userCredentials.password);
                 
             }
@@ -612,9 +646,10 @@ namespace MStoreServer
                 return RegisterStatus.userAlreadyRegistered;
             }
 
-            user = FindUser(userCredentials);
+            //user = FindUser(userCredentials);
 
             AddNewUserGames(user);
+            AddUserToFile(user);
 
             return RegisterStatus.successfull;
         }
@@ -813,6 +848,168 @@ namespace MStoreServer
             }
         }
 
+        public bool LoadUsersFromFile(string usersConfigFilePath)
+        {
+            users = new List<User>();
+            if (!File.Exists(usersConfigFilePath))
+            {
+                NetworkEngine.WriteError("Users config file on path \"" + usersConfigFilePath + "\" doesn't exist, do You want to create new? ( Y - yes, N - no )");
+                //return false;
+                ConsoleKeyInfo key = Console.ReadKey();
+                if(key.Key == ConsoleKey.Y)
+                {
+                    FileStream stream = File.Create(usersConfigFilePath);
+                    stream.Close();
+                    Debug.LogWarning("\nCreated new file");
+                }
+                else
+                {
+                    Debug.LogError("\nNot creating new file");
+                    return false;
+                }
+            }
+
+            string[] lines = File.ReadAllLines(usersConfigFilePath);
+
+            int lastCat = -1;
+
+            User lastUser = null;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Length == 0) continue;
+                switch (lines[i][0])
+                {
+                    case '+':
+                        if(lines[i].Remove(0,1) != "user")
+                        {
+                            Debug.LogError("Error in line " + i + ", unknown command " + lines[i].Remove(0, 1));
+                            return false;
+                        }
+                        if(lastUser != null)
+                        {
+                            if(lastUser.userName == "")
+                            {
+                                Debug.LogError("Cannot load userName in line " + i);
+                                return false;
+                            }
+                            if(lastUser.password == "")
+                            {
+                                Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + i);
+                                return false;
+                            }
+                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket);
+                            Debug.Log("Loaded user " + lastUser.userName);
+                        }
+                        lastUser = new User(-2, "", "", new List<Game>(), "");
+                        lastCat = -1;
+                        break;
+                    case '-':
+                        string category = "";
+                        string data = "";
+                        bool result = FileParser.ParseOption(lines[i], out category, out data);
+
+                        if (result)
+                        {
+                            Debug.Log("Category: " + category);
+                            Debug.Log("Data: " + data);
+
+                            //lastCat = -1;
+                            switch (category)
+                            {
+                                case "name":
+                                    lastUser.userName = data;
+                                    Debug.Log("New user username: " + lastUser.userName);
+                                    break;
+
+                                case "username":
+                                    lastUser.userName = data;
+                                    Debug.Log("New user username: " + lastUser.userName);
+                                    break;
+
+                                case "password":
+                                    lastUser.password = data;
+                                    Debug.Log("New user password: " + lastUser.password);
+                                    break;
+
+                                case "games":
+                                    lastCat = 1;
+                                    break;
+
+                                default:
+                                    NetworkEngine.WriteError("Category " + category + " not found, error in file in line " + (i + 1).ToString());
+                                    return false;
+                                    break;
+                            }
+                            lastCat = -1;
+                        }
+                        else
+                        {
+                            switch (category)
+                            {
+                                case "games":
+                                    lastCat = 1;
+                                    break;
+                            }
+                        }
+                        break;
+                    case '#':
+                        continue;
+                    case ' ':
+                        continue;
+                    default:
+                        switch (lastCat)
+                        {
+                            //Games
+                            case 1:
+                                long id = -5;
+                                if(!long.TryParse(lines[i], out id))
+                                {
+                                    Debug.LogError("Cannot parse \"" + lines[i] + "\" to gameID ( long ) in line " + i);
+                                    return false;
+                                }
+                                Game game = FindGame(id);
+                                if(game == null)
+                                {
+                                    Debug.LogError("Cannot find game with id " + id + " in line " + i);
+                                }
+
+                                lastUser.games.Add(game);
+                                Debug.Log("Added game " + game.name + " to user " + lastUser.userName);
+
+                                break;
+                            default:
+                                NetworkEngine.WriteError("Data without category ( " + lines[i] + " ) on line " + (i + 1).ToString());
+                                return false;
+                                break;
+                            case -1:
+                                NetworkEngine.WriteError("Data without category ( " + lines[i] + " ) on line " + (i + 1).ToString());
+                                return false;
+                                break;
+                        }
+                        break;
+                }
+            }
+
+            if (lastUser != null)
+            {
+                if (lastUser.userName == "")
+                {
+                    Debug.LogError("Cannot load userName in line " + lines.Length);
+                    return false;
+                }
+                if (lastUser.password == "")
+                {
+                    Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + lines.Length);
+                    return false;
+                }
+                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket);
+                Debug.Log("Loaded user " + lastUser.userName);
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Loads games from file
         /// </summary>
@@ -849,6 +1046,7 @@ namespace MStoreServer
 
                         if(result)
                         {
+                            lastCat = -1;
                             switch (category)
                             {
                                 case "name":
@@ -880,7 +1078,7 @@ namespace MStoreServer
                                     return false;
                                     break;
                             }
-                            lastCat = -1;
+                            
                         }
                         break;
                     case '#':
@@ -963,6 +1161,8 @@ namespace MStoreServer
             }
         }
 
+        
+
         const string configDir = "config.ini";
         /// <summary>
         /// Loads config from configDir
@@ -987,14 +1187,18 @@ namespace MStoreServer
         int port = 15332;
         int downloadEnginePort = 5592;
 
+        const string usersConfigDir = "users.conf";
+
         /// <summary>
         /// Loads config, Loads games and starts New client thread
         /// </summary>
         public StoreServer()
         {
-            users = new List<User>();
+            //users = new List<User>();
             LoadConfig();
             LoadGamesFromFile("games.conf");
+
+            LoadUsersFromFile(usersConfigDir);
 
             DisplayGames();
 

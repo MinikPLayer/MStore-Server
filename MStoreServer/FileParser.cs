@@ -15,7 +15,7 @@ namespace MStoreServer
         /// <param name="category"></param>
         /// <param name="data"></param>
         /// <param name="dataSeperationChar"></param>
-        /// <returns></returns>
+        /// <returns>True if data is in this line, false if empty data section</returns>
         public static bool ParseOption(string line, out string category, out string data, char dataSeperationChar = ':')
         {
             line = line.Remove(0, 1);
