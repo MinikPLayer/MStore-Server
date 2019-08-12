@@ -177,72 +177,174 @@ namespace MStoreServer
             {
                 case "OK":
                     return;
+                //Download
                 case "DWNLD":
-                    if(user == null)
                     {
-                        response = "NA";
-                        responseCode = "ERROR";
-                        break;
-                    }
-                    if(data.Length == 0)
-                    {
-                        response = "NF";
-                        responseCode = "ERROR";
-                        break;
-                    }
-                    Int64 id = -1;
-                    if(!Int64.TryParse(data, out id))
-                    {
-                        Debug.LogError("Cannot parse \"" + data + "\" to Int64");
-
-                        response = "NF";
-                        responseCode = "ERROR";
-                        break;
-                    }
-
-                    StoreServer.Game game = StoreServer.FindGame(id);
-
-                    if(game == null)
-                    {
-                        response = "NF";
-                        responseCode = "ERROR";
-                        break;
-                    }
-
-                    if(!StoreServer.CheckIfUserHaveGame(user, game))
-                    {
-                        response = "NA";
-                        responseCode = "ERROR";
-                        break;
-                    }
-
-                    
-
-                    UploadStatus status = SendFile(DownloadsManager.downloadFilesDirectory + game.filename, true, false);
-
-                    switch (status)
-                    {
-                        case UploadStatus.success:
-                            Debug.Log("File sent successfully");
-                            client.Send("OK", "DWNLD");
-                            workingThread.Start();
-
-                            return;
-                        case UploadStatus.alreadyWorking:
-                            Debug.Log("Thread is busy");
+                        if (user == null)
+                        {
+                            response = "NA";
+                            responseCode = "ERROR";
                             break;
-                        case UploadStatus.fileDoesntExist:
+                        }
+                        if (data.Length == 0)
+                        {
                             response = "NF";
                             responseCode = "ERROR";
                             break;
-                        case UploadStatus.unknownError:
-                            
+                        }
+                        Int64 id = -1;
+                        if (!Int64.TryParse(data, out id))
+                        {
+                            Debug.LogError("Cannot parse \"" + data + "\" to Int64");
+
+                            response = "NF";
+                            responseCode = "ERROR";
                             break;
-                        default:
+                        }
+
+                        StoreServer.Game game = StoreServer.FindGame(id);
+
+                        if (game == null)
+                        {
+                            response = "NF";
+                            responseCode = "ERROR";
                             break;
+                        }
+
+                        if (!StoreServer.CheckIfUserHaveGame(user, game))
+                        {
+                            response = "NA";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+
+
+                        UploadStatus status = SendFile(DownloadsManager.downloadFilesDirectory + game.filename, true, false);
+
+                        switch (status)
+                        {
+                            case UploadStatus.success:
+                                Debug.Log("File sent successfully");
+                                client.Send("OK", "DWNLD");
+                                workingThread.Start();
+
+                                return;
+                            case UploadStatus.alreadyWorking:
+                                Debug.Log("Thread is busy");
+                                break;
+                            case UploadStatus.fileDoesntExist:
+                                response = "NF";
+                                responseCode = "ERROR";
+                                break;
+                            case UploadStatus.unknownError:
+
+                                break;
+                            default:
+                                break;
+                        }
                     }
 
                     break;
+
+                //Game icon
+                case "GICON":
+                    {
+                        int resLevel = -1;
+                        if(data.Length == 0)
+                        {
+                            response = "NF";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+                        if(data[0] == 'H' || data[0] == 'h')
+                        {
+                            resLevel = 1;
+                        }
+                        else if(data[0] == 'L' || data[0] == 'l')
+                        {
+                            resLevel = 0;
+                        }
+                        else
+                        {
+                            response = "BS";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+                        data = data.Remove(0, 1);
+
+                        if (user == null)
+                        {
+                            //Not authorised
+                            response = "NA";
+                            responseCode = "ERROR";
+                            break;
+                        }
+                        if (data.Length == 0)
+                        {
+                            response = "NF";
+                            responseCode = "ERROR";
+                            break;
+                        }
+                        Int64 id = -1;
+                        if (!Int64.TryParse(data, out id))
+                        {
+                            Debug.LogError("Cannot parse \"" + data + "\" to Int64");
+
+                            response = "NF";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+                        StoreServer.Game game = StoreServer.FindGame(id);
+
+                        if (game == null)
+                        {
+                            //Not found
+                            response = "NF";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+                        if(game.iconPath == "\0")
+                        {
+                            //No icon
+                            response = "NI";
+                            responseCode = "ERROR";
+                            break;
+                        }
+
+                        
+
+                        UploadStatus status = SendFile(DownloadsManager.downloadIconsDirectory + game.iconPath + "_" + resLevel.ToString() + ".png", true, false);
+
+                        switch (status)
+                        {
+                            case UploadStatus.success:
+                                Debug.Log("File sent successfully");
+                                client.Send("OK", "DWNLD");
+                                workingThread.Start();
+
+                                return;
+                            case UploadStatus.alreadyWorking:
+                                Debug.Log("Thread is busy");
+                                break;
+                            case UploadStatus.fileDoesntExist:
+                                response = "NF";
+                                responseCode = "ERROR";
+                                break;
+                            case UploadStatus.unknownError:
+
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    break;
+
+                //Not found
                 default:
                     response = "NF";
                     responseCode = "ERROR";
@@ -275,6 +377,7 @@ namespace MStoreServer
     public class DownloadsManager
     {
         public static string downloadFilesDirectory = "./downloadFiles/";
+        public static string downloadIconsDirectory = "./downloadIcons/";
 
         public int port = -1;
         Thread listenThread;

@@ -239,7 +239,7 @@ namespace MStoreServer
                     {
                         size += (char)255;
                     }
-                    Debug.Log("Data to send size: " + size);
+                    Debug.Log("Data to send size: " + (int)size[0]);
                     if(!Send_LowLevel(size))
                     {
                         Debug.LogWarning("Send low level returned false");

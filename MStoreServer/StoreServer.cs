@@ -121,13 +121,15 @@ namespace MStoreServer
 
             public string execName = "\0";
 
+            public string iconPath = "\0";
+
             public Size diskSize = new Size(-1);
             public Size downloadSize = new Size(-1);
 
             public Price price;
 
 
-            public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0")
+            public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0", string _iconPath = "\0")
             {
                 name = _name;
                 id = _id;
@@ -135,6 +137,7 @@ namespace MStoreServer
                 price = _price;
 
                 filename = _filename;
+                iconPath = _iconPath;
             }
 
             public struct Size
@@ -244,6 +247,8 @@ namespace MStoreServer
                 Debug.LogError("User is null");
                 return "NF";
             }
+
+            Debug.Log("User games count: " + client.games.Count);
 
             string dataToSend = "";
             for(int i = 0;i<client.games.Count;i++)
@@ -565,10 +570,26 @@ namespace MStoreServer
         /// <param name="userCredentials"></param>
         /// <param name="client"></param>
         /// <returns>User info</returns>
-        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client)
+        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null)
         {
-            User user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client);
+            User user;
+            if (games == null)
+            {
+                user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client);
+            }
+            else
+            {
+                user = new User(users.Count, userCredentials.login, userCredentials.password, games, GenerateToken(), client);
+            }
+            
             //Mutex mtx = new Mutex();
+
+            return AddUser(user, client);
+        }
+
+        private User AddUser(User user, NetworkEngine.Client client)
+        {
+
             lock (usersListLock)
             {
                 users.Add(user);
@@ -898,7 +919,7 @@ namespace MStoreServer
                                 Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + i);
                                 return false;
                             }
-                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket);
+                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games);
                             Debug.Log("Loaded user " + lastUser.userName);
                         }
                         lastUser = new User(-2, "", "", new List<Game>(), "");
@@ -1003,7 +1024,7 @@ namespace MStoreServer
                     Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + lines.Length);
                     return false;
                 }
-                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket);
+                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games);
                 Debug.Log("Loaded user " + lastUser.userName);
             }
 
@@ -1072,6 +1093,9 @@ namespace MStoreServer
                                     break;
                                 case "exec":
                                     games[games.Count - 1].execName = data;
+                                    break;
+                                case "icon":
+                                    games[games.Count - 1].iconPath = data;
                                     break;
                                 default:
                                     NetworkEngine.WriteError("Category " + category + " not found, error in file on line " + (i+1).ToString());
@@ -1159,6 +1183,40 @@ namespace MStoreServer
                     Debug.Log("Error parsing " + line + " to port ( int )");
                 }
             }
+            else if (line.ToLower().StartsWith("downloadport="))
+            {
+                line = line.Remove(0, "downloadport=".Length);
+
+                int _downloadPort = 0;
+
+                if (int.TryParse(line, out _downloadPort))
+                {
+                    downloadEnginePort = _downloadPort;
+
+                    Debug.Log("New download engine port: " + downloadEnginePort);
+                }
+                else
+                {
+                    Debug.LogError("Invalid port format, cannot parse " + line + " to download port ( int )");
+                }
+            }
+            else if (line.ToLower().StartsWith("iconsdownloadport=") || line.ToLower().StartsWith("downloadiconsport="))
+            {
+                line = line.Remove(0, "iconsdownloadport=".Length);
+
+                int _downloadPort = 0;
+
+                if (int.TryParse(line, out _downloadPort))
+                {
+                    downloadIconsPort = _downloadPort;
+
+                    Debug.Log("New icons download port: " + downloadIconsPort);
+                }
+                else
+                {
+                    Debug.LogError("Invalid port format, cannot parse " + line + " to icons download port ( int )");
+                }
+            }
         }
 
         
@@ -1184,8 +1242,9 @@ namespace MStoreServer
                 
         }
 
-        int port = 15332;
-        int downloadEnginePort = 5592;
+        public int port = 15332;
+        public int downloadEnginePort = 5592;
+        public int downloadIconsPort = 5593;
 
         const string usersConfigDir = "users.conf";
 
@@ -1207,6 +1266,7 @@ namespace MStoreServer
             socket.addUserFunction = new NetworkEngine.NewClientFunction(AddClient);
 
             DownloadsManager downloadsManager = new DownloadsManager(downloadEnginePort);
+            DownloadsManager iconsDownloadManager = new DownloadsManager(downloadIconsPort);
         }
     }
 }
