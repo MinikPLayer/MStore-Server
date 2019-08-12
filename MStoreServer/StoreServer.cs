@@ -18,7 +18,28 @@ namespace MStoreServer
         private static List<User> users;
         private static List<Game> games;
 
+        private static List<Voucher> vouchers;
+
         private NetworkEngine socket;
+
+        public struct Voucher
+        {
+            public string code;
+
+            public long coinsAddon;
+            public long gameID;
+
+            public int usesLeft;
+
+            public Voucher(string _code, long _coinsAddon, long _gameID, int _usesCount)
+            {
+                code = _code;
+                coinsAddon = _coinsAddon;
+                gameID = _gameID;
+
+                usesLeft = _usesCount;
+            }
+        }
 
         public struct Price
         {
@@ -331,6 +352,59 @@ namespace MStoreServer
             return info;
         }
 
+        private bool updatingVoucherFile = false;
+        public void UpdateVoucherFile(Voucher voucherCode)
+        {
+            if(!File.Exists(voucherConfigDir))
+            {
+                Debug.LogError("Voucher config dir doesn't exist");
+                return;
+            }
+
+            while(updatingVoucherFile)
+            {
+                Thread.Sleep(10);
+            }
+
+            updatingVoucherFile = true;
+
+            string[] lines = File.ReadAllLines(voucherConfigDir);
+            for(int i = 0;i<lines.Length;i++)
+            {
+                if(lines[i].StartsWith(voucherCode.code))
+                {
+                    if(voucherCode.usesLeft < -1)
+                    {
+                        voucherCode.usesLeft = -1;
+                    }
+
+                    if(voucherCode.usesLeft == 0)
+                    {
+                        lines[i] = "";
+                        break;
+                    }
+
+                    lines[i] = voucherCode.code + ":";
+                    if(voucherCode.gameID != -1)
+                    {
+                        lines[i] += voucherCode.gameID.ToString();
+                    }
+                    else
+                    {
+                        
+                        lines[i] += 'c' + voucherCode.coinsAddon.ToString();
+                    }
+                    Debug.Log("Uses left" + voucherCode.usesLeft);
+                    lines[i] += ";" + voucherCode.usesLeft.ToString();
+                    break;
+                }
+            }
+
+            File.WriteAllLines(voucherConfigDir, lines);
+
+            updatingVoucherFile = false;
+        }
+
         public string ParseStoreGameInfo(Game game, User user = null)
         {
             string info = "";
@@ -343,6 +417,81 @@ namespace MStoreServer
             info += game.price.GetPriceStr(GetUserCurrency(user)) + "\n";
 
             return info;
+        }
+
+        public bool UseVoucher(string code, User user, out Voucher voucherUsed)
+        {
+            for(int i = 0;i<vouchers.Count;i++)
+            {
+                if(vouchers[i].code == code)
+                {
+
+                    if (vouchers[i].gameID != -1)
+                    {
+                        Game game = FindGame(vouchers[i].gameID);
+                        if(game == null)
+                        {
+                            Debug.LogError("Voucher for not existing game");
+                            voucherUsed = new Voucher("", -1, -1, -1);
+
+                            if (vouchers[i].usesLeft <= 1)
+                            {
+                                vouchers.RemoveAt(i);
+                            }
+                            else
+                            {
+                                vouchers[i] = new Voucher(vouchers[i].code, vouchers[i].coinsAddon, vouchers[i].gameID, vouchers[i].usesLeft - 1);
+                            }
+                            return false;
+                        }
+
+                        user.games.Add(game);
+                        voucherUsed = new Voucher(vouchers[i].code, vouchers[i].coinsAddon, vouchers[i].gameID, vouchers[i].usesLeft - 1);
+
+                        if (vouchers[i].usesLeft <= 1)
+                        {
+                            vouchers.RemoveAt(i);
+                        }
+                        else
+                        {
+                            vouchers[i] = new Voucher(vouchers[i].code, vouchers[i].coinsAddon, vouchers[i].gameID, vouchers[i].usesLeft - 1);
+                        }
+                        return true;
+                    }
+                    else
+                    {
+                        user.coins += vouchers[i].coinsAddon;
+                        voucherUsed = new Voucher(vouchers[i].code, vouchers[i].coinsAddon, vouchers[i].gameID, vouchers[i].usesLeft - 1);
+
+                        if (vouchers[i].usesLeft <= 1)
+                        {
+                            vouchers.RemoveAt(i);
+                        }
+                        else
+                        {
+                            vouchers[i] = new Voucher(vouchers[i].code, vouchers[i].coinsAddon, vouchers[i].gameID, vouchers[i].usesLeft - 1);
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            voucherUsed = new Voucher("", -1, -1, -1);
+
+            return false;
+        }
+
+        public bool CheckVoucher(string code)
+        {
+            for(int i = 0;i<vouchers.Count;i++)
+            {
+                if(vouchers[i].code == code)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -509,6 +658,46 @@ namespace MStoreServer
 
                         break;
                     }
+                case "VCHER":
+                    {
+                        User user = FindUser(client);
+                        if(user == null)
+                        {
+                            Send(client, "NA", "ERROR");
+                            return;
+                        }
+
+                        if(data.Length == 0)
+                        {
+                            //Bad argument
+                            Send(client, "BA", "ERROR");
+                            return;
+                        }
+
+                        bool result = CheckVoucher(data);
+
+                        if(result == false)
+                        {
+                            Send(client, "BV", "ERROR");
+                            return;
+                        }
+
+                        Voucher used;
+
+                        bool useResult = UseVoucher(data, user, out used);
+                        if(useResult == false)
+                        {
+                            Send(client, "NF", "ERROR");
+                            return;
+                        }
+
+                        UpdateUserValuesInFile(user);
+                        UpdateVoucherFile(used);
+
+                        Send(client, "OK", "VCHER");
+
+                        break;
+                    }
                     
             }
         }
@@ -627,7 +816,7 @@ namespace MStoreServer
         /// <returns></returns>
         public Price.Currency GetUserCurrency(User user)
         {
-            return Price.Currency.zloty;
+            return Price.Currency.coins;
         }
 
         /// <summary>
@@ -1006,6 +1195,115 @@ namespace MStoreServer
 
             client.thread.Start();
             Debug.Log("Client successfully added", ConsoleColor.Blue);
+        }
+
+        public bool LoadVouchersFromFile(string filePath)
+        {
+            vouchers = new List<Voucher>();
+
+            if (!File.Exists(filePath))
+            {
+                Debug.LogError("Voucher file path " + filePath + " doesn't exist");
+                return false;
+            }
+
+            string[] lines = File.ReadAllLines(filePath);
+            for(int i = 0;i<lines.Length;i++)
+            {
+                if(lines[i].Length == 0)
+                {
+                    continue;
+                }
+
+                if(lines[i][0] == '#')
+                {
+                    continue;
+                }
+
+                string code = "";
+                int colonPos = -1;
+                for(int j = 0;j<lines[i].Length;j++)
+                {
+                    if(lines[i][j] == ':')
+                    {
+                        colonPos = j;
+                        break;
+                    }
+
+                    code += lines[i][j];
+                }
+                if(colonPos == -1)
+                {
+                    Debug.LogError("Cannot parse line, no data after code in line " + i);
+                    return false;
+                }
+
+                lines[i] = lines[i].Remove(0, colonPos + 1);
+                bool coins = false;
+
+                if(lines[i][0] == 'c')
+                {
+                    coins = true;
+                    lines[i] = lines[i].Remove(0, 1);
+                }
+
+                bool semicolonFound = false;
+                string nmbr = "";
+                for(int j = 0;j<lines[i].Length;j++)
+                {
+                    if(lines[i][j] == ';')
+                    {
+                        lines[i] = lines[i].Remove(0, j+1);
+                        semicolonFound = true;
+                        break;
+                    }
+
+                    nmbr += lines[i][j];
+                }
+
+                if(!semicolonFound)
+                {
+                    lines[i] = "";
+                }
+
+                long number = 0;
+                if(!long.TryParse(nmbr, out number))
+                {
+                    Debug.LogError("Error at line " + i + ", cannot parse \"" + lines[i] + "\" to number ( long )");
+                    return false;
+                }
+
+                long coinsNumber = 0;
+                long gameID = -1;
+                if(coins)
+                {
+                    coinsNumber = number;
+                }
+                else
+                {
+                    gameID = number;
+                }
+
+                int uses = 0;
+                if(lines[i].Length == 0)
+                {
+                    Debug.Log("Infinite uses");
+                    uses = -1;
+                }
+                else
+                {
+                    if(!int.TryParse(lines[i], out uses))
+                    {
+                        Debug.LogError("Error at line " + i + ", cannot parse \"" + lines[i] + "\" to uses ( int )");
+                        return false;
+                    }
+                }
+
+                Debug.Log("Adding new voucher with code: " + code + " that adds " + coinsNumber + " coins and game with ID " + gameID + " with " + uses + " uses");
+                vouchers.Add(new Voucher(code, coinsNumber, gameID, uses));
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1430,6 +1728,7 @@ namespace MStoreServer
         public int downloadIconsPort = 5593;
 
         const string usersConfigDir = "users.conf";
+        const string voucherConfigDir = "vouchers.dat";
 
         /// <summary>
         /// Loads config, Loads games and starts New client thread
@@ -1441,6 +1740,8 @@ namespace MStoreServer
             LoadGamesFromFile("games.conf");
 
             LoadUsersFromFile(usersConfigDir);
+
+            LoadVouchersFromFile(voucherConfigDir);
 
             DisplayGames();
 
