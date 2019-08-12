@@ -192,8 +192,10 @@ namespace MStoreServer
 
             public Int64 id = -1;
 
+            public Int64 coins = -1;
 
-            public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null)
+
+            public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null, Int64 _coins = 0)
             {
                 games = _games;
                 id = _id;
@@ -202,6 +204,7 @@ namespace MStoreServer
                 games = _games;
                 token = _token;
                 socket = _socket;
+                coins = _coins;
             }
         }
 
@@ -320,7 +323,24 @@ namespace MStoreServer
             info += user.id.ToString() + '\n';
             info += user.token + '\n';
             info += user.userName + '\n';
+            info += user.coins.ToString() + '\n';
+
+            
             //info += user.games.Count.ToString() + '\n';
+
+            return info;
+        }
+
+        public string ParseStoreGameInfo(Game game, User user = null)
+        {
+            string info = "";
+            info += game.id + "\n";
+            info += game.name + "\n";
+            if(user == null)
+            {
+                info += game.price.GetPriceStr(Price.Currency.coins) + "\n";
+            }
+            info += game.price.GetPriceStr(GetUserCurrency(user)) + "\n";
 
             return info;
         }
@@ -346,52 +366,150 @@ namespace MStoreServer
             {
                 //User info
                 case "URNFO":
-                    Debug.Log("User info requested");
-                    User user = FindUser(client);
-                    if(user == null)
                     {
-                        Send(client, "User not found", "ERROR");
+                        Debug.Log("User info requested");
+                        User user = FindUser(client);
+                        if (user == null)
+                        {
+                            Send(client, "User not found", "ERROR");
+                            break;
+                        }
+                        Send(client, ParseUserInfo(user), "URNFO");
                         break;
                     }
-                    Send(client, ParseUserInfo(user), "URNFO");
-                    break;
 
                 //Request library
                 case "RQLBR":
-                    Debug.Log("Library requested");
-                    Send(client, CreateUserLibraryString(FindUser(client)), "RQLBR");
-                    break;
+                    {
+                        Debug.Log("Library requested");
+                        Send(client, CreateUserLibraryString(FindUser(client)), "RQLBR");
+                        break;
+                    }
+
 
                 //Game info
                 case "GMNFO":
-                    if(data.Length == 0)
                     {
-                        Debug.Log("Empty game id");
-                        Send(client, "Empty game id", "ERROR");
-                        break;
-                    }
-                    Int64 gameID = 0;
-                    if (Int64.TryParse(data, out gameID))
-                    {
-                        Game requestedGame = FindGame(gameID);
-
-                        if (requestedGame == null)
+                        if (data.Length == 0)
                         {
-                            Debug.Log("Game not found");
-                            Send(client, "Game not found", "ERROR");
+                            Debug.Log("Empty game id");
+                            Send(client, "Empty game id", "ERROR");
                             break;
                         }
-                        Debug.Log("Sending info for the game " + requestedGame.id);
-                        Send(client, ParseGameInfo(requestedGame, FindUser(client)), "GMNFO");
-                    }
-                    else
-                    {
-                        Debug.Log("Cannot parse game id");
-                        Send(client, "Game id is invalid", "ERROR");
+                        Int64 gameID = 0;
+                        if (Int64.TryParse(data, out gameID))
+                        {
+                            Game requestedGame = FindGame(gameID);
+
+                            if (requestedGame == null)
+                            {
+                                Debug.Log("Game not found");
+                                Send(client, "Game not found", "ERROR");
+                                break;
+                            }
+                            Debug.Log("Sending info for the game " + requestedGame.id);
+                            Send(client, ParseGameInfo(requestedGame, FindUser(client)), "GMNFO");
+                        }
+                        else
+                        {
+                            Debug.Log("Cannot parse game id");
+                            Send(client, "Game id is invalid", "ERROR");
+                            break;
+                        }
                         break;
                     }
 
-                    break;
+                    
+                // Store games list
+                case "SGLST":
+                    {
+                        User user = FindUser(client);
+                        if(user == null)
+                        {
+                            Send(client, "NA", "ERROR");
+                            return;
+                        }
+
+                        string dataToSend = "";
+
+                        //Adding all games info - to be corrected
+                        for(int i = 0;i<games.Count;i++)
+                        {
+                            bool userHasGame = false;
+                            //Checking if user already has game
+                            for(int j = 0;j<user.games.Count;j++)
+                            {
+                                if(user.games[j].id == games[i].id)
+                                {
+                                    userHasGame = true;
+                                    break;
+                                }
+                                
+
+                                
+                            }
+                            if (userHasGame) continue;
+                            dataToSend += ParseStoreGameInfo(games[i], user) + "\r";
+                        }
+
+                        if(dataToSend.Length == 0)
+                        {
+                            dataToSend = "\0";
+                        }
+                        Send(client, dataToSend, "SGLST");
+
+                        break;
+                    }
+                case "BGAME":
+                    {
+                        User user = FindUser(client);
+                        if(user == null)
+                        {
+                            Send(client, "NA", "ERROR");
+                            return;
+                        }
+
+                        Int64 _id = 0;
+                        if(!Int64.TryParse(data, out _id))
+                        {
+                            Send(client, "NF", "ERROR");
+                            return;
+                        }
+
+                        Game game = FindGame(_id);
+                        if(game == null)
+                        {
+                            Send(client, "NF", "ERROR");
+                            return;
+                        }
+
+                        for(int i = 0;i<user.games.Count;i++)
+                        {
+                            if(user.games[i].id == _id)
+                            {
+                                //Already bought
+                                Send(client, "AB", "ERROR");
+                                return;
+                            }
+                        }
+
+                        if(user.coins < game.price.GetPrice(Price.Currency.coins))
+                        {
+                            Send(client, "TP", "ERROR");
+                            return;
+                        }
+
+                        // Okay, so user is buying the game
+                        user.coins -= (long)game.price.GetPrice(Price.Currency.coins);
+                        user.games.Add(game);
+
+                        UpdateUserValuesInFile(user);
+
+                        Send(client, "OK", "BGAME");
+
+                        break;
+                    }
+                    
             }
         }
 
@@ -570,16 +688,16 @@ namespace MStoreServer
         /// <param name="userCredentials"></param>
         /// <param name="client"></param>
         /// <returns>User info</returns>
-        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null)
+        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null, Int64 coins = 0)
         {
             User user;
             if (games == null)
             {
-                user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client);
+                user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client, coins);
             }
             else
             {
-                user = new User(users.Count, userCredentials.login, userCredentials.password, games, GenerateToken(), client);
+                user = new User(users.Count, userCredentials.login, userCredentials.password, games, GenerateToken(), client, coins);
             }
             
             //Mutex mtx = new Mutex();
@@ -604,8 +722,63 @@ namespace MStoreServer
         /// <param name="user"></param>
         public void AddNewUserGames(User user)
         {
-            user.games.Add(games[0]);
-            user.games.Add(games[1]);
+
+        }
+
+        private static bool updatingUsersDataValues = false;
+        private void UpdateUserValuesInFile(User user)
+        {
+            if (!File.Exists(usersConfigDir))
+            {
+                Debug.LogError("Users config dir doesn't exist!");
+                return;
+            }
+            while(updatingUsersDataValues)
+            {
+                Thread.Sleep(10);
+            }
+
+            updatingUsersDataValues = true;
+
+            string[] _lines = File.ReadAllLines(usersConfigDir);
+
+            List<string> lines = new List<string>(_lines);
+
+            string nameLine = "-name:" + user.userName;
+
+            
+
+            for(int i = 0;i<lines.Count;i++)
+            {
+                if(lines[i] == nameLine)
+                {
+                    Debug.LogWarning("Found nameline");
+                    bool foundNewUser = false;
+                    for(int j = i;j<lines.Count;j++)
+                    {
+                        if(lines[j].StartsWith('+'))
+                        {
+                            foundNewUser = true;
+                            lines.RemoveRange(i, j - i - 1);
+                            lines[i - 1] = CreateUserDataInFileFormat(user);
+                            Debug.LogWarning("Lines[i-1]: " + lines[i - 1]);
+
+                            break;
+                        }
+                    }
+                    if(!foundNewUser)
+                    {
+                        lines.RemoveRange(i, lines.Count - i);
+                        lines[i - 1] = CreateUserDataInFileFormat(user);
+                        Debug.LogWarning("Lines[i-1]: " + lines[i - 1]);
+                    }
+                    break;
+                }
+            }
+
+            File.WriteAllLines(usersConfigDir, lines);
+
+            updatingUsersDataValues = false;
         }
 
         private string CreateUserDataInFileFormat(User user)
@@ -613,6 +786,7 @@ namespace MStoreServer
             string userData = "+user" + "\n";
             userData += "-name:" + user.userName + "\n";
             userData += "-password:" + user.password + "\n";
+            userData += "-coins:" + user.coins.ToString() + "\n";
             userData += "-games:" + "\n";
             for(int i = 0;i<user.games.Count;i++)
             {
@@ -804,6 +978,7 @@ namespace MStoreServer
         /// <param name="client"></param>
         private void AddClient_Thread(NetworkEngine.Client client)
         {
+
             User user = null;
             LoginStatus status = LoginStatus.notRegistered;
             while (status != LoginStatus.successfull)
@@ -919,7 +1094,7 @@ namespace MStoreServer
                                 Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + i);
                                 return false;
                             }
-                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games);
+                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, lastUser.coins);
                             Debug.Log("Loaded user " + lastUser.userName);
                         }
                         lastUser = new User(-2, "", "", new List<Game>(), "");
@@ -943,14 +1118,22 @@ namespace MStoreServer
                                     Debug.Log("New user username: " + lastUser.userName);
                                     break;
 
-                                case "username":
-                                    lastUser.userName = data;
-                                    Debug.Log("New user username: " + lastUser.userName);
-                                    break;
-
                                 case "password":
                                     lastUser.password = data;
                                     Debug.Log("New user password: " + lastUser.password);
+                                    break;
+
+                                case "coins":
+                                    Int64 newCoinsValue = 0;
+                                    if(Int64.TryParse(data, out newCoinsValue))
+                                    {
+                                        lastUser.coins = newCoinsValue;
+                                    }
+                                    else
+                                    {
+                                        Debug.LogError("Cannot parse \"" + data + "\" to coins ( long )");
+                                        return false;
+                                    }
                                     break;
 
                                 case "games":
@@ -1024,7 +1207,7 @@ namespace MStoreServer
                     Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + lines.Length);
                     return false;
                 }
-                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games);
+                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, lastUser.coins);
                 Debug.Log("Loaded user " + lastUser.userName);
             }
 
@@ -1267,6 +1450,9 @@ namespace MStoreServer
 
             DownloadsManager downloadsManager = new DownloadsManager(downloadEnginePort);
             DownloadsManager iconsDownloadManager = new DownloadsManager(downloadIconsPort);
+
+
+            
         }
     }
 }

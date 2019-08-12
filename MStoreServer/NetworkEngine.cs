@@ -137,8 +137,8 @@ namespace MStoreServer
                     }
                     else
                     {
-                        Debug.Log("Setting size to 0");
-                        size = 0;
+                        
+                        size = maxPacketSize;
                     }
 
                     //Debug.Log("Data to send size: " + size);
