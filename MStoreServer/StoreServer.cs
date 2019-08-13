@@ -11,6 +11,8 @@ using System.Threading;
 
 using System.IO.Compression;
 
+using System.Security.Cryptography;
+
 namespace MStoreServer
 {
     public class StoreServer
@@ -189,13 +191,15 @@ namespace MStoreServer
 
             public string iconPath = "\0";
 
+            public int version = -1;
+
             public Size diskSize = new Size(-1);
             public Size downloadSize = new Size(-1);
 
             public Price price;
 
 
-            public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0", string _iconPath = "\0")
+            public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0", string _iconPath = "\0", int _version = -1)
             {
                 name = _name;
                 id = _id;
@@ -204,6 +208,8 @@ namespace MStoreServer
 
                 filename = _filename;
                 iconPath = _iconPath;
+
+                version = _version;
             }
 
             public struct Size
@@ -371,6 +377,10 @@ namespace MStoreServer
             info += "\n";
             info += game.diskSize.bytes.ToString();
             info += "\n";
+
+            //Version
+            info += game.version.ToString();
+            info += "\n";
             
 
             return info;
@@ -413,7 +423,7 @@ namespace MStoreServer
 
             updatingVoucherFile = true;
 
-            string[] lines = File.ReadAllLines(voucherConfigDir);
+            string[] lines = MFile.ReadAllLines(voucherConfigDir);
             for(int i = 0;i<lines.Length;i++)
             {
                 if(lines[i].StartsWith(voucherCode.code))
@@ -445,7 +455,7 @@ namespace MStoreServer
                 }
             }
 
-            File.WriteAllLines(voucherConfigDir, lines);
+            MFile.WriteAllLines(voucherConfigDir, lines);
 
             updatingVoucherFile = false;
         }
@@ -528,13 +538,22 @@ namespace MStoreServer
 
         public bool CheckVoucher(string code)
         {
+            Voucher notUsed;
+            return CheckVoucher(code, out notUsed);
+        }
+
+        public bool CheckVoucher(string code, out Voucher voucher)
+        {
             for(int i = 0;i<vouchers.Count;i++)
             {
                 if(vouchers[i].code == code)
                 {
+                    voucher = vouchers[i];
                     return true;
                 }
             }
+
+            voucher = new Voucher("", -1, -1, -1);
 
             return false;
         }
@@ -819,13 +838,33 @@ namespace MStoreServer
                             return;
                         }
 
-                        bool result = CheckVoucher(data);
+                        Voucher v;
+
+                        bool result = CheckVoucher(data, out v);
 
                         if(result == false)
                         {
                             Send(client, "BV", "ERROR");
                             return;
                         }
+
+                        if(v.gameID > 0)
+                        {
+                            Game gm = FindGame(v.gameID);
+                            if(gm == null)
+                            {
+                                Send(client, "NF", "ERROR");
+                                return;
+                            }
+
+                            if(CheckIfUserHaveGame(user, gm))
+                            {
+                                //Already bought
+                                Send(client, "AB", "ERROR");
+                                return;
+                            }
+                        }
+
 
                         Voucher used;
 
@@ -863,6 +902,21 @@ namespace MStoreServer
                     users.RemoveAt(i);
                 }
             }
+        }
+
+        public static Game FindGame(string name)
+        {
+            name = name.ToLower();
+
+            for(int i = 0;i<games.Count;i++)
+            {
+                if(games[i].name.ToLower() == name)
+                {
+                    return games[i];
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -1074,7 +1128,7 @@ namespace MStoreServer
 
             updatingUsersDataValues = true;
 
-            string[] _lines = File.ReadAllLines(usersConfigDir);
+            string[] _lines = MFile.ReadAllLines(usersConfigDir);
 
             List<string> lines = new List<string>(_lines);
 
@@ -1110,7 +1164,9 @@ namespace MStoreServer
                 }
             }
 
-            File.WriteAllLines(usersConfigDir, lines);
+            lines = MUtil.RemoveEmptyLines(lines);
+
+            MFile.WriteAllLines(usersConfigDir, lines.ToArray());
 
             updatingUsersDataValues = false;
         }
@@ -1120,7 +1176,7 @@ namespace MStoreServer
             string userData = "+user" + "\n";
             userData += "-name:" + user.userName + "\n";
             userData += "-password:" + user.password + "\n";
-            userData += "-coins:" + user.coins.ToString(user) + "\n";
+            userData += "-coins:" + user.coins.GetPrice(Price.Currency.coins).ToString() + "\n";
             userData += "-games:" + "\n";
             for(int i = 0;i<user.games.Count;i++)
             {
@@ -1142,7 +1198,10 @@ namespace MStoreServer
 
             string userData = CreateUserDataInFileFormat(user);
 
-            File.AppendAllText(usersConfigDir, userData);
+            
+            
+
+            MFile.AppendAllText(usersConfigDir, userData);
         }
 
         /// <summary>
@@ -1352,7 +1411,10 @@ namespace MStoreServer
                 return false;
             }
 
-            string[] lines = File.ReadAllLines(filePath);
+            string[] lines = MFile.ReadAllLines(filePath);
+
+            lines = MUtil.RemoveEmptyLines(lines);
+
             for(int i = 0;i<lines.Length;i++)
             {
                 if(lines[i].Length == 0)
@@ -1412,7 +1474,7 @@ namespace MStoreServer
                 }
 
                 long number = 0;
-                if(!long.TryParse(nmbr, out number))
+                if (!long.TryParse(nmbr, out number))
                 {
                     Debug.LogError("Error at line " + i + ", cannot parse \"" + lines[i] + "\" to number ( long )");
                     return false;
@@ -1422,11 +1484,22 @@ namespace MStoreServer
                 long gameID = -1;
                 if(coins)
                 {
+
                     coinsNumber = number;
                 }
                 else
                 {
                     gameID = number;
+
+                    //Find game by name
+                    /*Game game = FindGame(nmbr);
+                    if(game == null)
+                    {
+                        Debug.LogError("Cannot find game with name " + nmbr);
+                        return false;
+                    }
+
+                    gameID = game.id;*/
                 }
 
                 int uses = 0;
@@ -1508,7 +1581,16 @@ namespace MStoreServer
                 }
             }
 
-            string[] lines = File.ReadAllLines(usersConfigFilePath);
+            string[] lines = MFile.ReadAllLines(usersConfigFilePath);
+
+            lines = MUtil.RemoveEmptyLines(lines);
+
+
+            Debug.Log("Lines:");
+            for(int i = 0;i<lines.Length;i++)
+            {
+                Debug.Log(lines[i]);
+            }
 
             int lastCat = -1;
 
@@ -1620,6 +1702,7 @@ namespace MStoreServer
                                 if(game == null)
                                 {
                                     Debug.LogError("Cannot find game with id " + id + " in line " + i);
+                                    return false;
                                 }
 
                                 lastUser.games.Add(game);
@@ -1673,7 +1756,9 @@ namespace MStoreServer
                 return false;
             }
 
-            string[] lines = File.ReadAllLines(configFilePath);
+            string[] lines = MFile.ReadAllLines(configFilePath);
+
+            lines = MUtil.RemoveEmptyLines(lines);
 
             int lastCat = -1;
 
@@ -1683,7 +1768,7 @@ namespace MStoreServer
                 switch(lines[i][0])
                 {
                     case '+':
-                        games.Add(new Game("", games.Count));
+                        games.Add(new Game("", -games.Count - 1));
                         Debug.Log("GAME ADDED");
                         lastCat = -1;
                         break;
@@ -1701,6 +1786,7 @@ namespace MStoreServer
                                 case "app":
                                     games[games.Count - 1].name = data;
                                     break;
+
                                 case "price":
                                     try
                                     {
@@ -1712,18 +1798,54 @@ namespace MStoreServer
                                         return false;
                                     }
                                     break;
+
                                 case "path":
                                     games[games.Count - 1].path = data;
                                     break;
+
                                 case "file":
                                     games[games.Count - 1].filename = data;
                                     break;
+
                                 case "exec":
                                     games[games.Count - 1].execName = data;
                                     break;
+
                                 case "icon":
                                     games[games.Count - 1].iconPath = data;
                                     break;
+
+                                case "id":
+                                    long _id = 0;
+                                    if(long.TryParse(data, out _id))
+                                    {
+                                        Game game = FindGame(_id);
+                                        if(game != null)
+                                        {
+                                            Debug.LogError("ID " + _id + " is already taken!");
+                                            return false;
+                                        }
+
+                                        games[games.Count - 1].id = _id;
+                                    }
+                                    else
+                                    {
+                                        Debug.LogError("Cannot parse " + data + " to game ID ( long )");
+                                        return false;
+                                    }
+                                    
+                                    break;
+
+                                case "version":
+                                    int v = 0;
+                                    if(!int.TryParse(data, out v))
+                                    {
+                                        Debug.LogError("Cannot parse " + data + " to version ( int )");
+                                        return false;
+                                    }
+                                    games[games.Count - 1].version = v;
+                                    break;
+
                                 default:
                                     NetworkEngine.WriteError("Category " + category + " not found, error in file on line " + (i+1).ToString());
                                     return false;
@@ -1869,6 +1991,8 @@ namespace MStoreServer
                 
         }
 
+
+
         public int port = 15332;
         public int downloadEnginePort = 5592;
         public int downloadIconsPort = 5593;
@@ -1876,11 +2000,203 @@ namespace MStoreServer
         const string usersConfigDir = "users.conf";
         const string voucherConfigDir = "vouchers.dat";
 
+
+        public bool LoadAESKeysFromFile(string filePath)
+        {
+            if(!File.Exists(filePath))
+            {
+                Debug.LogError("File " + filePath + " doesn't exist");
+                return false;
+            }
+
+            string file = File.ReadAllText(filePath);
+            //Debug.Log("File: " + file);
+            if(file.Length == 0)
+            {
+                Debug.LogError("Empty file");
+                return false;
+            }
+
+            //Checking if encrypted
+            if (file.StartsWith("encrypt"))
+            {
+                while (true)
+                {
+
+
+                    Debug.LogWarning("File is not encrypted, do You want to encrypt? Y - yes, N - no");
+                    ConsoleKeyInfo info = Console.ReadKey();
+                    if (info.Key == ConsoleKey.Y)
+                    {
+                        Debug.Log("\nEncrypting file...");
+
+                        /*List<byte[]> encryptedFileList = new List<byte[]>();
+
+                        for(int i = 0;i<lines.Length;i++)
+                        {
+                            encryptedFileList.Add(EncryptString(lines[i], lockFileKey, lockFileIV));
+                        }
+
+                        FileStream fs = File.Create(filePath);
+                        for(int i = 0;i< encryptedFileList.Count;i++)
+                        {
+                            fs.Write(encryptedFileList[i], 0, encryptedFileList[i].Length);
+                        }
+                        fs.Close();*/
+
+                        string[] l = MUtil.StringToStringArray(file);
+                        //Debug.Log("l lenght: " + l.Length);
+                        file = "";
+                        for(int i = 1;i<l.Length - 1;i++)
+                        {
+                            //Debug.Log("Adding " + l[i]);
+                            file += l[i] + "\n";
+                        }
+                        file += l[l.Length - 1];
+
+                        byte[] encrypted = MCrypt.EncryptString(file, MCrypt.lockFileKey, MCrypt.lockFileIV);
+
+                        File.WriteAllBytes(filePath, encrypted);
+
+                        return LoadAESKeysFromFile(filePath);
+                        
+                    }
+                    if (info.Key == ConsoleKey.N)
+                    {
+                        Debug.LogWarning("\nBad idea... So i'm closing");
+
+
+                        return false;
+                    }
+                }
+
+                
+            }
+            else
+            {
+                //Debug.Log("Decyrpting file...");
+            }
+
+
+
+            byte[] encryptedFile = File.ReadAllBytes(filePath);
+
+            string decryptedFile = MCrypt.DecryptByteArray(encryptedFile, MCrypt.lockFileKey, MCrypt.lockFileIV);
+
+            //Debug.Log("Decryption result: \n\n\"" + decryptedFile + "\"\n\n");
+
+            //0 - key, 1 - IV
+            string[] lines = MUtil.StringToStringArray(decryptedFile);
+
+            /*Debug.Log("Lines:");
+            for(int i = 0;i<lines.Length;i++)
+            {
+                Debug.Log(lines[i]);
+            }*/
+
+            if(lines.Length != 2)
+            {
+                Debug.LogError("Bad data count in file, got " + lines.Length + " instead of 3");
+                return false;
+            }
+
+            byte[] iv = MCrypt.ParseLineToAESKey(lines[0]);
+            byte[] key = MCrypt.ParseLineToAESKey(lines[1]);
+            
+
+            if(key == null)
+            {
+                Debug.LogError("Cannot convert line to key");
+                return false;
+            }
+
+            if (iv == null)
+            {
+                Debug.LogError("Cannot convert line to IV");
+                return false;
+            }
+
+
+
+            MCrypt.filesKey = key;
+            MCrypt.filesIV = iv;
+
+            return true;
+        }
+
+        public void EncryptFilesIfNeeded(string[] files)
+        {
+            for(int i = 0;i<files.Length;i++)
+            {
+                if(!File.Exists(files[i]))
+                {
+                    Debug.LogWarning("File " + files[i] + " doesn't exist");
+                    continue;
+                }
+
+                string[] lines = File.ReadAllLines(files[i]);
+                if(lines.Length == 0)
+                {
+                    continue;
+                }
+                if(lines[0] != "encrypt")
+                {
+                    //Debug.LogWarning("Not encrypting " + files[i]);
+                    continue;
+                }
+
+
+                string toEncrypt = "";
+                for(int j = 1;j<lines.Length - 1;j++)
+                {
+                    toEncrypt += lines[j] + '\n';
+                }
+                toEncrypt += lines[lines.Length - 1];
+
+
+                //byte[] encrypted = MCrypt.EncryptString(toEncrypt);
+
+                //File.WriteAllBytes(files[i], encrypted);
+                MFile.WriteAllText(files[i], toEncrypt);
+            }
+        }
+
+        public void RemoveEmptyLinesFromFiles(string[] files)
+        {
+            for(int i = 0;i<files.Length;i++)
+            {
+                if(!File.Exists(files[i]))
+                {
+                    Debug.LogWarning("Files " + files[i] + " doesn't exist");
+                    continue;
+                }
+
+                string[] content = MFile.ReadAllLines(files[i]);
+
+                content = MUtil.RemoveEmptyLines(content);
+
+                MFile.WriteAllLines(files[i], content);
+            }
+        }
+
         /// <summary>
         /// Loads config, Loads games and starts New client thread
         /// </summary>
         public StoreServer()
         {
+            bool result = LoadAESKeysFromFile("lock");
+            if(!result)
+            {
+                Debug.LogError("Cannot continue without AES keys");
+                Thread.Sleep(5000);
+                Environment.Exit(-10);
+                return;
+            }
+
+            string[] files = { "games.conf", usersConfigDir, voucherConfigDir };
+            EncryptFilesIfNeeded(files);
+            RemoveEmptyLinesFromFiles(files);
+
             //users = new List<User>();
             LoadConfig();
             LoadGamesFromFile("games.conf");
