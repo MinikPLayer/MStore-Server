@@ -89,6 +89,22 @@ namespace MStoreServer
                 public static Currency coins = new Currency(1, " coins");
             }
 
+            public override string ToString()
+            {
+                Debug.LogWarning("Using default currency ( coins ) to convert price to string");
+                return ToString(Price.Currency.coins);
+            }
+
+            public string ToString(User user)
+            {
+                return GetPriceStr(GetUserCurrency(user));
+            }
+
+            public string ToString(Currency currency)
+            {
+                return GetPriceStr(currency);
+            }
+
             public string GetPriceStr(Currency currency)
             {
                 if (this == Price.free) return "Free";
@@ -106,6 +122,11 @@ namespace MStoreServer
             }
 
             public static Price free = new Price(0);
+
+            public static implicit operator Price(long coinsNumber)
+            {
+                return new Price(coinsNumber);
+            }
 
             public static bool operator==(Price price1, Price price2)
             {
@@ -129,6 +150,30 @@ namespace MStoreServer
                 {
                     return true;
                 }
+            }
+
+            public static Price operator+(Price price1, long addon)
+            {
+                price1.coins += addon;
+
+                return price1;
+            }
+
+            public static Price operator -(Price price1, long addon)
+            {
+                price1.coins -= addon;
+
+                return price1;
+            }
+
+            public static bool operator <(Price price1, Price price2)
+            {
+                return price1.coins < price2.coins;
+            }
+
+            public static bool operator >(Price price1, Price price2)
+            {
+                return price1.coins > price2.coins;
             }
         }
 
@@ -213,7 +258,7 @@ namespace MStoreServer
 
             public Int64 id = -1;
 
-            public Int64 coins = -1;
+            public Price coins = new Price(-1);
 
 
             public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null, Int64 _coins = 0)
@@ -225,7 +270,7 @@ namespace MStoreServer
                 games = _games;
                 token = _token;
                 socket = _socket;
-                coins = _coins;
+                coins.SetPrice(Price.Currency.coins, _coins);
             }
         }
 
@@ -344,7 +389,7 @@ namespace MStoreServer
             info += user.id.ToString() + '\n';
             info += user.token + '\n';
             info += user.userName + '\n';
-            info += user.coins.ToString() + '\n';
+            info += user.coins.ToString(user) + '\n';
 
             
             //info += user.games.Count.ToString() + '\n';
@@ -579,11 +624,111 @@ namespace MStoreServer
                             return;
                         }
 
+                        Price maximumPrice = new Price(-1);
+                        Price minimumPrice = new Price(-1);
+                        string gameNameFilter = "";
+
+                        string actualFilter = "";
+                        for(int i = 0;i<data.Length;i++)
+                        {
+                            if(data[i] == '\n')
+                            {
+                                if(actualFilter.Length == 0)
+                                {
+                                    Send(client, "BF", "ERROR");
+                                    return;
+                                }
+
+                                char filterChar = actualFilter[0];
+                                actualFilter = actualFilter.Remove(0, 1);
+                                if (actualFilter.Length == 0)
+                                {
+                                    Send(client, "BF", "ERROR");
+                                    return;
+                                }
+
+                                switch (filterChar)
+                                {
+                                    //Max
+                                    case 'M':
+                                        {
+                                            int value = 0;
+                                            if(!int.TryParse(actualFilter, out value))
+                                            {
+                                                Send(client, "BF", "ERROR");
+                                                return;
+                                            }
+
+                                            maximumPrice.SetPrice(GetUserCurrency(user), value);
+
+                                            break;
+                                        }
+
+                                    //Min
+                                    case 'm':
+                                        {
+                                            int value = 0;
+                                            if (!int.TryParse(actualFilter, out value))
+                                            {
+                                                Send(client, "BF", "ERROR");
+                                                return;
+                                            }
+
+                                            minimumPrice.SetPrice(GetUserCurrency(user), value);
+
+                                            break;
+                                        }
+
+                                    //Search
+                                    case 'S':
+                                        {
+                                            gameNameFilter = actualFilter.ToLower();
+                                            break;
+                                        }
+
+                                    default:
+                                        //Bad filter
+                                        Send(client, "BF", "ERROR");
+                                        return;
+                                }
+
+
+                                actualFilter = "";
+                                continue;
+                            }
+
+                            actualFilter += data[i];
+                        }
+
                         string dataToSend = "";
 
                         //Adding all games info - to be corrected
                         for(int i = 0;i<games.Count;i++)
                         {
+                            if(minimumPrice.GetPrice(Price.Currency.coins) > 0)
+                            {
+                                if(games[i].price < minimumPrice)
+                                {
+                                    continue;
+                                }
+                            }
+
+                            if (maximumPrice.GetPrice(Price.Currency.coins) > 0)
+                            {
+                                if (games[i].price > maximumPrice)
+                                {
+                                    continue;
+                                }
+                            }
+
+                            if(gameNameFilter.Length != 0)
+                            {
+                                if (!games[i].name.ToLower().Contains(gameNameFilter))
+                                {
+                                    continue;
+                                }
+                            }
+
                             bool userHasGame = false;
                             //Checking if user already has game
                             for(int j = 0;j<user.games.Count;j++)
@@ -642,7 +787,7 @@ namespace MStoreServer
                             }
                         }
 
-                        if(user.coins < game.price.GetPrice(Price.Currency.coins))
+                        if(user.coins < game.price)
                         {
                             Send(client, "TP", "ERROR");
                             return;
@@ -814,9 +959,9 @@ namespace MStoreServer
         /// </summary>
         /// <param name="user"></param>
         /// <returns></returns>
-        public Price.Currency GetUserCurrency(User user)
+        public static Price.Currency GetUserCurrency(User user)
         {
-            return Price.Currency.coins;
+            return Price.Currency.zloty;
         }
 
         /// <summary>
@@ -877,7 +1022,7 @@ namespace MStoreServer
         /// <param name="userCredentials"></param>
         /// <param name="client"></param>
         /// <returns>User info</returns>
-        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null, Int64 coins = 0)
+        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null, long coins = 0)
         {
             User user;
             if (games == null)
@@ -975,7 +1120,7 @@ namespace MStoreServer
             string userData = "+user" + "\n";
             userData += "-name:" + user.userName + "\n";
             userData += "-password:" + user.password + "\n";
-            userData += "-coins:" + user.coins.ToString() + "\n";
+            userData += "-coins:" + user.coins.ToString(user) + "\n";
             userData += "-games:" + "\n";
             for(int i = 0;i<user.games.Count;i++)
             {
@@ -1392,7 +1537,7 @@ namespace MStoreServer
                                 Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + i);
                                 return false;
                             }
-                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, lastUser.coins);
+                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins));
                             Debug.Log("Loaded user " + lastUser.userName);
                         }
                         lastUser = new User(-2, "", "", new List<Game>(), "");
@@ -1426,6 +1571,7 @@ namespace MStoreServer
                                     if(Int64.TryParse(data, out newCoinsValue))
                                     {
                                         lastUser.coins = newCoinsValue;
+                                        //lastUser.coins.SetPrice(newCoin)
                                     }
                                     else
                                     {
@@ -1505,7 +1651,7 @@ namespace MStoreServer
                     Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + lines.Length);
                     return false;
                 }
-                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, lastUser.coins);
+                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins));
                 Debug.Log("Loaded user " + lastUser.userName);
             }
 
