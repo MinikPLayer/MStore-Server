@@ -55,14 +55,11 @@ namespace MStoreServer
 
             quotationOpened = false;
 
-            Console.WriteLine(data);
-
             for(int i = 0;i<data.Length;i++)
             {
                 //Console.WriteLine("Trying " + data[i].ToString());
                 if(data[i] == '\"')
                 {
-                    Console.WriteLine("Quotation");
                     quotationOpened = !quotationOpened;
                     continue;
                 }

@@ -6,28 +6,60 @@ namespace MStoreServer
 {
     public static class Debug
     {
-        public static void Log(object data, ConsoleColor color = ConsoleColor.White)
+        public static void Log(object data, ConsoleColor color = ConsoleColor.White, bool newLine = true)
         {
             ConsoleColor originalColor = Console.ForegroundColor;
             Console.ForegroundColor = color;
-            Console.WriteLine(data);
+            if (newLine)
+            {
+                Console.WriteLine(data);
+            }
+            else
+            {
+                Console.Write(data);
+            }
             Console.ForegroundColor = originalColor;
         }
 
-        public static void LogWarning(object data)
+        public static void LogWarning(object data, bool newLine = true)
         {
             ConsoleColor originalColor = Console.ForegroundColor;
             Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine(data);
+            if (newLine)
+            {
+                Console.WriteLine(data);
+            }
+            else
+            {
+                Console.Write(data);
+            }
             Console.ForegroundColor = originalColor;
         }
 
-        public static void LogError(object data)
+        public static void LogError(object data, bool newLine = true)
         {
             ConsoleColor originalColor = Console.ForegroundColor;
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(data);
+            if (newLine)
+            {
+                Console.WriteLine(data);
+            }
+            else
+            {
+                Console.Write(data);
+            }
             Console.ForegroundColor = originalColor;
+        }
+
+        public static void ConversionError(string src, string dstName = "", object dst = null)
+        {
+            if (dst == null)
+            {
+                LogError("Cannot convert \"" + src + "\"");
+                return;
+            }
+
+            LogError("Cannot convert \"" + src + "\" to " + dstName + " ( " + dst.GetType().Name + " )");
         }
     }
 }

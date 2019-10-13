@@ -29,6 +29,8 @@ namespace MStoreServer
             public delegate void DataFunction(string data, Client client);
             public DataFunction dataReceivedFunction = null;
 
+            NetworkStream stream;
+
             public bool disposed
             {
                 get; private set;
@@ -67,16 +69,15 @@ namespace MStoreServer
             protected bool Send_LowLevel(byte[] data)
             {
                 if (!active || disposed) return false;
-                NetworkStream stream;
+                
                 try
                 {
-                    stream = socket.GetStream();
+                    
 
                     //byte[] sendBytes = System.Text.Encoding.ASCII.GetBytes(data);
                     //Encoding.
                     try
                     {
-                        //Debug.Log("Writing " + data.Length);
                         stream.Write(data, 0, data.Length);
                     }
                     catch (System.IO.IOException e)
@@ -97,7 +98,7 @@ namespace MStoreServer
                 return true;
             }
 
-            const int maxPacketSize = 255;
+            const byte maxPacketSize = 250;
             /// <summary>
             /// Packet send ( messageCode, size and data )
             /// </summary>
@@ -124,81 +125,84 @@ namespace MStoreServer
 
                 if(data.Length == 0)
                 {
-                    data = new byte[1];
-                    data[0] = 0;
+                    //data = new byte[1];
+                    //data[0] = 0;
+                    return;
                 }
-                while(data.Length != 0)
+                byte[] array;
+
+                if (data.Length < maxPacketSize + 1)
                 {
-                    byte size;
-                    
-                    if(data.Length < maxPacketSize + 1)
-                    {
-                        size = (byte)data.Length;
-                    }
-                    else
-                    {
-                        
-                        size = maxPacketSize;
-                    }
-
-                    //Debug.Log("Data to send size: " + size);
-                    byte[] array = new byte[1];
-                    array[0] = size;
-
-                    //Size
-                    if (!Send_LowLevel(array))
-                    {
-                        //Debug.LogWarning("Send low level returned false");
-                        return;
-                    }
-
-                    byte[] sendData;
-
-                    if(data.Length > maxPacketSize)
-                    {
-                        sendData = new byte[maxPacketSize];
-                        for(int i = 0;i< maxPacketSize; i++)
-                        {
-                            sendData[i] = data[i];
-                        }
-                    }
-                    else
-                    {
-                        sendData = new byte[data.Length];
-                        for(int i = 0;i<data.Length;i++)
-                        {
-                            sendData[i] = data[i];
-                        }
-                    }
-
-                    if (!Send_LowLevel(sendData))
-                    {
-                        //Debug.LogWarning("Send low level returned false");
-                        return;
-                    }
-
-                    if(data.Length > maxPacketSize)
-                    {
-                        byte[] newData = new byte[data.Length - maxPacketSize];
-                        for(int i = maxPacketSize; i<data.Length;i++)
-                        {
-                            newData[i - maxPacketSize] = data[i];
-                        }
-
-                        data = newData;
-                    }
-                    else
-                    {
-                        data = new byte[0];
-                    }
-
-                    if (requireConfirmation)
-                    {
-                        //Wait for packet receive confirmation
-                        Receive_LowLevel(1, true, false);
-                    }
-
+                    array = new byte[1];
+                    array[0] = (byte)data.Length;
                 }
+                else
+                {
+                    int addon = 1;
+                    if (data.Length % maxPacketSize == 0) addon = 0; // Yeah, you need that because array would be too big
+                    array = new byte[data.Length / maxPacketSize  + addon];
+
+                    int len = data.Length;
+
+                    int it = 0;
+                    while(len > maxPacketSize)
+                    {
+                        array[it] = 0;
+                        len -= maxPacketSize;
+
+                        it++;
+                    }
+                    // Command to expect more packets
+                    if (len == maxPacketSize)
+                    {
+                        len = 255;
+                    }
+
+                    array[it] = (byte)len;
+                }
+                    
+                    
+
+                //Size
+                if (!Send_LowLevel(array))
+                {
+                    return;
+                }
+
+                byte[] sendData;
+
+                sendData = new byte[data.Length];
+                for(int i = 0;i<data.Length;i++)
+                {
+                    sendData[i] = data[i];
+                }
+
+                if (!Send_LowLevel(sendData))
+                {
+                    return;
+                }
+
+                if (data.Length > maxPacketSize)
+                {
+                    byte[] newData = new byte[data.Length - maxPacketSize];
+                    for(int i = maxPacketSize; i<data.Length;i++)
+                    {
+                        newData[i - maxPacketSize] = data[i];
+                    }
+
+                    data = newData;
+                }
+                else
+                {
+                    data = new byte[0];
+                }
+
+                if (requireConfirmation)
+                {
+                    //Wait for packet receive confirmation
+                    Receive_LowLevel(1, true, false);
+                }
+
             }
 
             /// <summary>
@@ -231,24 +235,23 @@ namespace MStoreServer
 
 
                     //size += (char)(data.Length % 256);
-                    if(data.Length < 256)
+                    if(data.Length < maxPacketSize + 1)
                     {
                         size += (char)(data.Length);
                     }
                     else
                     {
-                        size += (char)255;
+                        size += (char)maxPacketSize;
                     }
-                    Debug.Log("Data to send size: " + (int)size[0]);
                     if(!Send_LowLevel(size))
                     {
                         Debug.LogWarning("Send low level returned false");
                         return;
                     }
                     string sendData = data;
-                    if (data.Length >= 256)
+                    if (data.Length >= maxPacketSize + 1)
                     {
-                        sendData = data.Remove(256);
+                        sendData = data.Remove(maxPacketSize + 1);
                     }
 
                     if (!Send_LowLevel(sendData))
@@ -257,9 +260,9 @@ namespace MStoreServer
                         return;
                     }
 
-                    if (data.Length > 255)
+                    if (data.Length > maxPacketSize)
                     {
-                        data = data.Remove(0, 255);
+                        data = data.Remove(0, maxPacketSize);
                     }
                     else
                     {
@@ -296,7 +299,6 @@ namespace MStoreServer
                             NetworkStream stream = socket.GetStream();
                             while (!stream.DataAvailable && __ReceiveData.Length == 0)
                             {
-                                //Debug.Log("No stream available");
                                 Thread.Sleep(10);
                                 if (!active) return "\0";
                                 while (suspendReceivingThread && !forceReceive)
@@ -318,28 +320,23 @@ namespace MStoreServer
                                 if(__ReceiveData.Length != 0)
                                 {
                                     length = (byte)__ReceiveData[0];
-                                    Debug.Log("Size byte: " + length);
 
                                     __ReceiveData = __ReceiveData.Remove(0, 1);
                                 }
                                 else
                                 {
-                                    Debug.Log("Receiving size");
 
                                     byte[] sizeBuffer = new byte[1];
                                     while(stream.Read(sizeBuffer, 0, 1) <= 0)
                                     {
-                                        Debug.Log("No data available");
                                         Thread.Sleep(50);
                                     }
                                     length = sizeBuffer[0];
 
-                                    Debug.Log("New size: " + length);
                                 }
 
                                 while (!stream.DataAvailable && __ReceiveData.Length == 0)
                                 {
-                                    //Debug.Log("No stream available");
                                     Thread.Sleep(10);
                                     if (!active) return "\0";
                                     while (suspendReceivingThread && !forceReceive)
@@ -390,7 +387,6 @@ namespace MStoreServer
 
                                 try
                                 {
-                                    //Debug.Log("Size: " + length);
                                     Int32 bytesCount = stream.Read(buffer, 0, length);
                                     __ReceiveData += System.Text.Encoding.ASCII.GetString(buffer, 0, bytesCount);
                                     bytesReceived += bytesCount;
@@ -405,7 +401,6 @@ namespace MStoreServer
                                     return "\0";
                                 }
                             }
-                            Debug.Log("Data received: " + __ReceiveData);
                         }
                         catch (ObjectDisposedException e)
                         {
@@ -443,7 +438,6 @@ namespace MStoreServer
                 string returnData = "";
                 if (length == -1)
                 {
-                    Debug.Log("Lenght is -1");
                     returnData = __ReceiveData;
 
                     __ReceiveData = "";
@@ -471,7 +465,6 @@ namespace MStoreServer
             /// <param name="timeout">Receive timeout</param>
             protected void Receive(bool forceReceive, bool looping, int timeout = -1, bool clearReceive = true)
             {
-                Debug.Log("Starting to receive");
                 
                 if(clearReceive)
                 {
@@ -501,7 +494,6 @@ namespace MStoreServer
 
                 suspendReceivingThread = false;
 
-                Debug.Log("Received data: " + receiveData);
                 
             }
 
@@ -579,6 +571,7 @@ namespace MStoreServer
             public Client(TcpClient client, bool createReceivingThread = true, bool startReceivingThread = true)
             {
                 socket = client;
+                stream = socket.GetStream();
 
                 if (createReceivingThread)
                 {
@@ -588,6 +581,8 @@ namespace MStoreServer
                         thread.Start();
                     }
                 }
+
+                
 
                 Send("WP", "CMMND"); // Welcome packet
             }

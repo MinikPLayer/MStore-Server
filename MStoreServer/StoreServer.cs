@@ -19,12 +19,17 @@ namespace MStoreServer
     {
         private static List<User> users;
         private static List<Game> games;
-
+        
         private static List<Voucher> vouchers;
+
+        private static List<Group> groups;
+
+        private static int defaultPermissionLevlID = -1;
+
 
         private NetworkEngine socket;
 
-        public struct Voucher
+        public class Voucher
         {
             public string code;
 
@@ -40,6 +45,24 @@ namespace MStoreServer
                 gameID = _gameID;
 
                 usesLeft = _usesCount;
+            }
+        }
+
+        public struct GroupPrice
+        {
+            public Price price;
+            public Group group;
+
+            public GroupPrice(Price _price, Group _group)
+            {
+                price = _price;
+                group = _group;
+            }
+
+            public GroupPrice(long coins, Group _group)
+            {
+                price = new Price(coins);
+                group = _group;
             }
         }
 
@@ -198,6 +221,8 @@ namespace MStoreServer
 
             public Price price;
 
+            public List<GroupPrice> groupPrices = new List<GroupPrice>();
+
 
             public Game(string _name = "\0", Int64 _id = -1, string _path = "\0", Price _price = default(Price), string _filename = "\0", string _iconPath = "\0", int _version = -1)
             {
@@ -262,12 +287,28 @@ namespace MStoreServer
 
             public string token = "\0";
 
+            public Group permissionLevel;
+
             public Int64 id = -1;
 
             public Price coins = new Price(-1);
 
+            private bool workingOnGames = false;
+            public void AddGame(Game game)
+            {
+                while(workingOnGames)
+                {
+                    Thread.Sleep(10);
+                }
 
-            public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null, Int64 _coins = 0)
+                workingOnGames = true;
+
+                games.Add(game);
+
+                workingOnGames = false;
+            }
+
+            public User(Int64 _id, string _userName, string _password, List<Game> _games, string _token, NetworkEngine.Client _socket = null, Int64 _coins = 0, Group _permissionLevel = null)
             {
                 games = _games;
                 id = _id;
@@ -277,6 +318,33 @@ namespace MStoreServer
                 token = _token;
                 socket = _socket;
                 coins.SetPrice(Price.Currency.coins, _coins);
+                permissionLevel = _permissionLevel;
+
+                if(_permissionLevel == null)
+                {
+                    permissionLevel = FindGroup(defaultPermissionLevlID);
+                    if(permissionLevel == null)
+                    {
+                        Debug.LogError("Cannot find default permission ID");
+                        return;
+                    }
+                }
+            }
+        }
+
+        public class Group
+        {
+            public int id;
+            public string name;
+
+            public bool isAdmin = false;
+
+            public Group(int _id, string _name, bool _isAdmin)
+            {
+                id = _id;
+                name = _name;
+
+                isAdmin = _isAdmin;
             }
         }
 
@@ -323,8 +391,6 @@ namespace MStoreServer
                 return "NF";
             }
 
-            Debug.Log("User games count: " + client.games.Count);
-
             string dataToSend = "";
             for(int i = 0;i<client.games.Count;i++)
             {
@@ -363,7 +429,6 @@ namespace MStoreServer
             info += game.name;
             info += "\n";
             info += game.price.GetPriceStr(GetUserCurrency(user));
-            Debug.Log("Game price: " + game.price.GetPriceStr(GetUserCurrency(user)));
             info += "\n";
             info += game.path;
             info += "\n";
@@ -407,6 +472,22 @@ namespace MStoreServer
             return info;
         }
 
+        public string ParseVoucherInfo(Voucher voucher)
+        {
+
+            // Game voucher
+            if(voucher.gameID >= 0)
+            {
+                return voucher.code + ":" + voucher.gameID + ";" + voucher.usesLeft.ToString();
+            }
+            else // Coins voucher
+            {
+                return voucher.code + ":c" + voucher.coinsAddon + ";" + voucher.usesLeft.ToString();
+            }
+
+            
+        }
+
         private bool updatingVoucherFile = false;
         public void UpdateVoucherFile(Voucher voucherCode)
         {
@@ -423,12 +504,16 @@ namespace MStoreServer
 
             updatingVoucherFile = true;
 
+
+            bool updated = false;
             string[] lines = MFile.ReadAllLines(voucherConfigDir);
             for(int i = 0;i<lines.Length;i++)
             {
                 if(lines[i].StartsWith(voucherCode.code))
                 {
-                    if(voucherCode.usesLeft < -1)
+                    updated = true;
+
+                    if (voucherCode.usesLeft < -1)
                     {
                         voucherCode.usesLeft = -1;
                     }
@@ -449,10 +534,14 @@ namespace MStoreServer
                         
                         lines[i] += 'c' + voucherCode.coinsAddon.ToString();
                     }
-                    Debug.Log("Uses left" + voucherCode.usesLeft);
                     lines[i] += ";" + voucherCode.usesLeft.ToString();
+                   
                     break;
                 }
+            }
+            if(!updated)
+            {
+                lines[lines.Length - 1] += "\n" + ParseVoucherInfo(voucherCode);
             }
 
             MFile.WriteAllLines(voucherConfigDir, lines);
@@ -474,7 +563,8 @@ namespace MStoreServer
             return info;
         }
 
-        public bool UseVoucher(string code, User user, out Voucher voucherUsed)
+
+        /*public bool UseVoucher(string code, User user, out Voucher voucherUsed)
         {
             for(int i = 0;i<vouchers.Count;i++)
             {
@@ -534,28 +624,81 @@ namespace MStoreServer
             voucherUsed = new Voucher("", -1, -1, -1);
 
             return false;
+        }*/
+
+        public bool UseVoucher(User user, Voucher voucher)
+        {
+            if (voucher.gameID != -1)
+            {
+                Game game = FindGame(voucher.gameID);
+                if (game == null)
+                {
+                    Debug.LogError("Voucher for not existing game");
+                    //voucherUsed = new Voucher("", -1, -1, -1);
+
+                    /*if (voucher.usesLeft <= 1)
+                    {
+                        vouchers.Remove(voucher);
+                    }
+                    else
+                    {
+                        voucher.usesLeft--;
+                    }*/
+                    return false;
+                }
+
+                user.games.Add(game);
+                if (voucher.usesLeft == -1) return true;
+                voucher.usesLeft--;
+
+                if (voucher.usesLeft <= 1)
+                {
+                    //vouchers.Remove(voucher);
+                    RemoveVoucher(voucher);
+                }
+                else
+                {
+                    voucher.usesLeft--;
+                }
+                return true;
+            }
+            else
+            {
+                user.coins += voucher.coinsAddon;
+                if (voucher.usesLeft == -1) return true;
+                voucher.usesLeft--;
+
+                if (voucher.usesLeft <= 1)
+                {
+                    //vouchers.Remove(voucher);
+                    RemoveVoucher(voucher);
+                }
+                else
+                {
+                    voucher.usesLeft--;
+                }
+                return true;
+            }
         }
 
-        public bool CheckVoucher(string code)
+        /*public bool CheckVoucher(string code)
         {
             Voucher notUsed;
             return CheckVoucher(code, out notUsed);
-        }
+        }*/
 
-        public bool CheckVoucher(string code, out Voucher voucher)
+        public Voucher FindVoucher(string code)
         {
             for(int i = 0;i<vouchers.Count;i++)
             {
                 if(vouchers[i].code == code)
                 {
-                    voucher = vouchers[i];
-                    return true;
+                    return vouchers[i];
                 }
             }
 
-            voucher = new Voucher("", -1, -1, -1);
 
-            return false;
+            return null;
         }
 
         /// <summary>
@@ -575,13 +718,13 @@ namespace MStoreServer
             }
             
             data = data.Remove(0, 5);
-            switch(command)
+            User user = FindUser(client);
+            switch (command)
             {
                 //User info
                 case "URNFO":
                     {
                         Debug.Log("User info requested");
-                        User user = FindUser(client);
                         if (user == null)
                         {
                             Send(client, "User not found", "ERROR");
@@ -605,7 +748,7 @@ namespace MStoreServer
                     {
                         if (data.Length == 0)
                         {
-                            Debug.Log("Empty game id");
+                            Debug.LogError("Empty game id");
                             Send(client, "Empty game id", "ERROR");
                             break;
                         }
@@ -616,7 +759,7 @@ namespace MStoreServer
 
                             if (requestedGame == null)
                             {
-                                Debug.Log("Game not found");
+                                Debug.LogError("Game not found");
                                 Send(client, "Game not found", "ERROR");
                                 break;
                             }
@@ -625,7 +768,7 @@ namespace MStoreServer
                         }
                         else
                         {
-                            Debug.Log("Cannot parse game id");
+                            Debug.LogError("Cannot parse game id");
                             Send(client, "Game id is invalid", "ERROR");
                             break;
                         }
@@ -636,7 +779,6 @@ namespace MStoreServer
                 // Store games list
                 case "SGLST":
                     {
-                        User user = FindUser(client);
                         if(user == null)
                         {
                             Send(client, "NA", "ERROR");
@@ -775,7 +917,6 @@ namespace MStoreServer
                     }
                 case "BGAME":
                     {
-                        User user = FindUser(client);
                         if(user == null)
                         {
                             Send(client, "NA", "ERROR");
@@ -824,7 +965,7 @@ namespace MStoreServer
                     }
                 case "VCHER":
                     {
-                        User user = FindUser(client);
+                        
                         if(user == null)
                         {
                             Send(client, "NA", "ERROR");
@@ -840,9 +981,9 @@ namespace MStoreServer
 
                         Voucher v;
 
-                        bool result = CheckVoucher(data, out v);
+                        v = FindVoucher(data);
 
-                        if(result == false)
+                        if(v == null)
                         {
                             Send(client, "BV", "ERROR");
                             return;
@@ -866,9 +1007,14 @@ namespace MStoreServer
                         }
 
 
-                        Voucher used;
+                        Voucher used = FindVoucher(data);
+                        if(used == null)
+                        {
+                            Debug.LogError("Cannot find voucher with code \"" + data + "\"");
+                            return;
+                        }
 
-                        bool useResult = UseVoucher(data, user, out used);
+                        bool useResult = UseVoucher(user, used);
                         if(useResult == false)
                         {
                             Send(client, "NF", "ERROR");
@@ -882,7 +1028,512 @@ namespace MStoreServer
 
                         break;
                     }
-                    
+
+
+                // Admin commands
+                case "ADMIN":
+                    {
+                        if(!user.permissionLevel.isAdmin)
+                        {
+                            Send(client, "NA", "ERROR");
+                            return;
+                        }
+
+                        if (data.Length == 0)
+                        {
+                            Send(client, "BA", "ERROR");
+                            return;
+                        }
+
+                        string workingString = "";
+                        data = MUtil.GetStringToSpecialCharAndDelete(data, ';', out workingString);
+
+                        if (data.Length == 0 && workingString.Length < 5)
+                        {
+                            Send(client, "BA", "ERROR");
+                            return;
+                        }
+
+                        string cmdType = "";
+                        string cmdTypeArg = "";
+
+                        cmdType = workingString.Substring(0, 3);
+                        cmdTypeArg = workingString.Substring(3, 2);
+
+                        // Admin command
+                        workingString = workingString.Remove(0, 5);
+
+                        bool dataIsNumber = true;
+                        long userID = -1;
+
+                        if(!long.TryParse(workingString, out userID))
+                        {
+                            //Debug.LogError("Cannot convert \"" + workingString + "\" to targetID ( long )");
+                            //Send(client, "BC", "ERROR");
+                            //return;
+                            dataIsNumber = false;
+                        }
+
+
+
+
+                        
+                        /*if(data.Length < 5)
+                        {
+                            Debug.LogError("No admin command sent");
+                            Send(client, "BC", "ERROR");
+                            return;
+                        }*/
+                        
+                        /*for(int i = 0;i<3;i++)
+                        {
+                            cmdType += data[i];
+                        }
+                        for(int i = 3;i<5;i++)
+                        {
+                            cmdTypeArg += data[i];
+                        }*/
+
+                        //data = data.Remove(0, 5);
+
+                        switch (cmdType)
+                        {
+                            case "VCH":
+                                {
+                                    string voucherCode = workingString;
+                                    int uses = -1;
+                                    long gameID = -1;
+                                    long coins = -1;
+
+                                    Voucher voucher = FindVoucher(voucherCode);
+
+
+                                    string pomStr = "";
+                                    if (data.Length > 0)
+                                    {
+                                        
+                                        data = MUtil.GetStringToSpecialCharAndDelete(data, ';', out pomStr);
+
+                                        if (!int.TryParse(pomStr, out uses))
+                                        {
+                                            Debug.LogError("Cannot parse \"" + pomStr + "\" to uses ( int )");
+                                            Send(client, "BC", "ERROR");
+                                            return;
+                                        }
+                                    }
+
+                                    if (data.Length > 0)
+                                    {
+
+                                        data = MUtil.GetStringToSpecialCharAndDelete(data, ';', out pomStr);
+
+                                        bool coinsVoucher = false;
+                                        if(pomStr[0] == 'C' || pomStr[0] == 'c')
+                                        {
+                                            coinsVoucher = true;
+                                            pomStr = pomStr.Remove(0, 1);
+                                        }
+
+                                        long number = -1;
+
+                                        if (!long.TryParse(pomStr, out number))
+                                        {
+                                            Debug.LogError("Cannot parse \"" + pomStr + "\" to gameID ( long )");
+                                            Send(client, "BC", "ERROR");
+                                            return;
+                                        }
+
+                                        if(coinsVoucher)
+                                        {
+                                            coins = number;
+                                        }
+                                        else
+                                        {
+                                            gameID = number;
+                                        }
+                                    }
+
+
+                                    
+
+                                    switch (cmdTypeArg)
+                                    {
+                                        
+                                        // Add
+                                        case "AD":
+                                            {
+                                                if (voucher != null)
+                                                {
+                                                    Debug.LogError("Voucher \"" + voucherCode + "\" already exist");
+                                                    Send(client, "VE", "ERROR");
+                                                    return;
+                                                }
+
+                                                if (gameID < 0 && coins < 0)
+                                                {
+                                                    Debug.LogError("No gameID and coins number specified!");
+                                                    //Bad argument
+                                                    Send(client, "BA", "ERROR");
+                                                    return;
+                                                }
+
+                                                Voucher targetVoucher = new Voucher(voucherCode, coins, gameID, uses);
+
+                                                //vouchers.Add(targetVoucher);
+                                                AddVoucher(targetVoucher);
+                                                UpdateVoucherFile(targetVoucher);
+
+                                                Send(client, "OK", "VCHAD");
+
+                                                break;
+                                            }
+
+                                        // Delete
+                                        case "DL":
+                                            {
+                                                if(voucher == null)
+                                                {
+                                                    Debug.LogError("Voucher \"" + voucherCode + "\" doesn't exist");
+                                                    Send(client, "VE", "ERROR");
+                                                    return;
+                                                }
+
+                                                RemoveVoucher(voucher);
+                                                voucher.usesLeft = 0;
+                                                UpdateVoucherFile(voucher);
+
+                                                Send(client, "OK", "VCHDL");
+                                                break;
+                                            }
+
+                                        // Break
+                                        case "CH":
+                                            {
+                                                if(voucher == null)
+                                                {
+                                                    Debug.LogError("Voucher \"" + voucherCode + "\" doesn't exist");
+                                                    Send(client, "VE", "ERROR");
+                                                    return;
+                                                }
+
+                                                // Uses - 1st argument ( type of value to change ), gameID - 2nd arg ( new Value )
+
+                                                switch (uses)
+                                                {
+                                                    // Uses
+                                                    case 0:
+                                                        {
+                                                            
+
+                                                            voucher.usesLeft = (int)gameID;
+                                                            Debug.Log("[ADMIN] New uses left: " + voucher.usesLeft);
+                                                            Send(client, "OK0", "VCHCH");
+                                                            break;
+                                                        }
+
+                                                    // Coins
+                                                    case 1:
+                                                        {
+                                                            voucher.coinsAddon = gameID;
+                                                            Debug.Log("[ADMIN] New coins addon: " + voucher.coinsAddon);
+                                                            Send(client, "OK1", "VCHCH");
+                                                            break;
+                                                        }
+
+                                                    case 2:
+                                                        {
+                                                            voucher.gameID = gameID;
+                                                            Debug.Log("[ADMIN] New gameID: " + voucher.gameID);
+                                                            Send(client, "OK2", "VCHCH");
+                                                            break;
+                                                        }
+
+                                                    default:
+                                                        Debug.LogError("Unknown change command");
+                                                        Send(client, "CC", "ERROR");
+                                                        return;
+                                                }
+
+                                                UpdateVoucherFile(voucher);
+
+                                                break;
+                                            }
+
+                                        // List
+                                        case "LS":
+                                            {
+                                                string dataToSend = "";
+                                                for(int i = 0;i<vouchers.Count;i++)
+                                                {
+                                                    dataToSend += ParseVoucherInfo(vouchers[i]) + "\n";
+                                                }
+
+                                                Send(client, dataToSend, "VCHLS");
+
+                                                break;
+                                            }
+
+                                        // Info
+                                        case "NF":
+                                            {
+                                                if(voucher == null)
+                                                {
+                                                    Debug.LogError("Voucher not found");
+                                                    Send(client, "NF", "ERROR");
+                                                    return;
+                                                }
+
+                                                string voucherInfo = ParseVoucherInfo(voucher);
+                                                Send(client, voucherInfo, "VCHNF");
+
+                                                break;
+                                            }
+
+                                        default:
+                                            Debug.LogError("Don't know what to do with VCH arg: \"" + cmdTypeArg + "\"");
+                                            Send(client, "BT", "ERROR");
+                                            return;
+                                    }
+
+                                    break;
+                                }
+
+                            // Money
+                            case "MNY":
+                                {
+                                    if(!dataIsNumber)
+                                    {
+                                        Debug.LogError("Cannot convert \"" + workingString + "\" to userID ( long )");
+                                        Send(client, "BC", "ERROR");
+                                        return;
+                                    }
+                                    User targetUser = FindUser(userID);
+
+                                    if (targetUser == null)
+                                    {
+                                        Send(client, "NF", "ERROR");
+                                        return;
+                                    }
+
+                                    decimal val = -1;
+                                    if (!decimal.TryParse(data, out val))
+                                    {
+                                        Debug.LogError("Cannot convert \"" + data + "\" to value ( decimal )");
+                                        Send(client, "BC", "ERROR");
+                                        return;
+                                    }
+
+                                    switch (cmdTypeArg)
+                                    {
+                                        // Change
+                                        case "CH":
+                                            {
+                                                targetUser.coins.SetPrice(GetUserCurrency(targetUser), val);
+
+                                                Send(client, "OK", "MNYCH");
+                                                break;
+                                            }
+                                        // Add
+                                        case "AD":
+                                            {
+                                                targetUser.coins.SetPrice(GetUserCurrency(targetUser), targetUser.coins.GetPrice(Price.Currency.coins) + val);
+
+                                                Send(client, "OK", "MNYAD");
+
+                                                Debug.Log("[ADMIN] Money added");
+                                                break;
+                                            }
+                                        // Substract
+                                        case "SB":
+                                            {
+                                                targetUser.coins.SetPrice(GetUserCurrency(targetUser), targetUser.coins.GetPrice(Price.Currency.coins) - val);
+                                                if(targetUser.coins.GetPrice(Price.Currency.coins) < 0)
+                                                {
+                                                    targetUser.coins.SetPrice(Price.Currency.coins, 0);
+                                                }
+
+                                                Send(client, "OK", "MNYSB");
+                                                break;
+                                            }
+
+                                        default:
+                                            Debug.LogError("Don't know what to do with MNY arg: \"" + cmdTypeArg + "\"");
+                                            Send(client, "BT", "ERROR");
+                                            return;
+                                    }
+
+                                    UpdateUserValuesInFile(targetUser);
+
+                                    break;
+                                }
+
+                            case "USR":
+                                {
+
+                                    if (!dataIsNumber)
+                                    {
+                                        Debug.LogError("Cannot convert \"" + workingString + "\" to userID ( long )");
+                                        Send(client, "BC", "ERROR");
+                                        return;
+                                    }
+                                    User targetUser = FindUser(userID);
+
+                                    if (targetUser == null)
+                                    {
+                                        Send(client, "NF", "ERROR");
+                                        return;
+                                    }
+
+                                    switch (cmdTypeArg)
+                                    {
+                                        // Info
+                                        case "NF":
+                                            {
+                                                string usrInfoStr = ParseUserInfo(targetUser);
+                                                Send(client, usrInfoStr, "USRNF");
+
+                                                break;
+                                            }
+
+                                        // User ID
+                                        case "ID":
+                                            {
+                                                string userName = data;
+                                                targetUser = FindUser(userName);
+                                                if(targetUser == null)
+                                                {
+                                                    Debug.LogError("Cannot find user \"" + userName + "\"");
+                                                    Send(client, "NF", "ERROR");
+                                                    return;
+                                                }
+
+                                                Send(client, targetUser.id.ToString(), "USRID");
+
+                                                break;
+                                            }
+
+                                        default:
+                                            Debug.LogError("Don't know what to do with MNY arg: \"" + cmdTypeArg + "\"");
+                                            Send(client, "BT", "ERROR");
+                                            return;
+                                    }
+
+                                    break;
+                                }
+
+                            // User Game
+                            case "UGM":
+                                {
+                                    string usIDStr = "";
+                                    workingString = MUtil.GetStringToSpecialCharAndDelete(workingString, ';', out usIDStr);
+
+                                    // User ID
+                                    long usID = -1;
+                                    if (!long.TryParse(usIDStr, out usID))
+                                    {
+                                        Debug.ConversionError(usIDStr, "usID", usID);
+                                        return;
+                                    }
+
+                                    Debug.Log("[ADMIN] Library requested");
+                                    User usr = FindUser(usID);
+
+                                    if (usr == null)
+                                    {
+                                        Debug.LogError("User with id " + usID + " not found");
+                                        Send(client, "BU", "ERROR");
+                                        return;
+                                    }
+
+                                    bool searchById = false;
+
+                                    
+
+                                    Game game = null;
+
+                                    if(workingString.Length > 0)
+                                    {
+                                        if(workingString[0] == 'i')
+                                        {
+                                            searchById = true;
+                                        }
+                                        else if(workingString[0] == 'n')
+                                        {
+                                            searchById = false;
+                                        }
+                                        else
+                                        {
+                                            Debug.LogError("No search type specified");
+                                            Send(client, "ST", "ERROR");
+                                            return;
+                                        }
+
+                                        workingString = MUtil.GetStringToSpecialCharAndDelete(workingString, ';', out usIDStr);
+
+                                        long gmID = -1;
+                                        if (!long.TryParse(usIDStr, out gmID))
+                                        {
+                                            Debug.ConversionError(usIDStr, "gmID", gmID);
+                                            return;
+                                        }
+
+                                        game = FindGame(gmID);
+                                    }
+
+                                    switch (cmdTypeArg)
+                                    {
+                                        // List
+                                        case "LS":
+                                            {
+
+                                                Send(client, CreateUserLibraryString(usr), "RQLBR");
+                                                break;
+                                            }
+
+                                        // Add
+                                        case "AD":
+                                            {
+                                                if(game == null)
+                                                {
+                                                    Debug.LogError("Cannot find game");
+                                                    Send(client, "BG", "ERROR");
+                                                    return;
+                                                }
+
+                                                for(int i = 0;i<user.games.Count;i++)
+                                                {
+                                                    if(user.games[i].id == game.id)
+                                                    {
+                                                        Debug.LogError("Cannot add game that user already has");
+                                                        Send(client, "GE", "ERROR");
+                                                        return;
+                                                    }
+                                                }
+
+                                                user.AddGame(game);
+
+                                                Send(client, "OK", "ADMIN");
+
+                                                break;
+                                            }
+
+                                        default:
+                                            break;
+                                    }
+
+
+                                    break;
+                                }
+
+                            default:
+                                Debug.LogError("Command \"" + cmdType + "\" not found");
+                                Send(client, "BC", "ERROR");
+                                return;
+                        }
+                        
+                      
+                        break;
+                    }
             }
         }
 
@@ -902,6 +1553,31 @@ namespace MStoreServer
                     users.RemoveAt(i);
                 }
             }
+        }
+
+        public static Group FindGroup(string name)
+        {
+            for (int i = 0; i < groups.Count; i++)
+            {
+                if (groups[i].name == name)
+                {
+                    return groups[i];
+                }
+            }
+
+            return null;
+        }
+
+        public static Group FindGroup(int id)
+        {
+            for(int i = 0;i<groups.Count;i++)
+            {
+                if(groups[i].id == id)
+                {
+                    return groups[i];
+                }
+            }
+            return null;
         }
 
         public static Game FindGame(string name)
@@ -937,6 +1613,29 @@ namespace MStoreServer
             return null;
         }
 
+        public User FindUser(long id)
+        {
+            for (int i = 0; i < users.Count; i++)
+            {
+                if (users[i].id == id)
+                {
+                    return users[i];
+                }
+            }
+            return null;
+        }
+
+        public User FindUser(string userName)
+        {
+            for (int i = 0; i < users.Count; i++)
+            {
+                if (users[i].userName == userName)
+                {
+                    return users[i];
+                }
+            }
+            return null;
+        }
 
         /// <summary>
         /// Finds user by client socket
@@ -983,23 +1682,14 @@ namespace MStoreServer
 
 
 
-            //string username = client.ReadData('\n');
-            Debug.Log("Waiting for username...");
             string username = client.Receive_LowLevel(-2, false, false);
-            Debug.Log("Username: " + username);
 
-            //client.Send("N");
-            Debug.Log("Sending N to client");
             if (!Send(client, "N", "CMMND"))
             {
                 return new UserCredentials("NR", "-");//LoginStatus.unknownError;
             }
 
-            //client.ForceReceive();
-            //string password = client.ReadData('\n');
-            Debug.Log("Waiting for password...");
             string password = client.Receive_LowLevel(-2, false, false);
-            Debug.Log("Password: " + password);
 
             return new UserCredentials(username, password);
         }
@@ -1064,7 +1754,6 @@ namespace MStoreServer
                     token += (char)randomGenerator.Next(32, 127);
                 }
 
-                Debug.Log("Token: \"" + token + "\"");
             } while (FindUserByToken(token) != null);
 
             return token;
@@ -1076,16 +1765,16 @@ namespace MStoreServer
         /// <param name="userCredentials"></param>
         /// <param name="client"></param>
         /// <returns>User info</returns>
-        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null, long coins = 0)
+        private User AddUser(UserCredentials userCredentials, NetworkEngine.Client client, List<Game> games = null, long coins = 0, Group permissionLevel = null)
         {
             User user;
             if (games == null)
             {
-                user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client, coins);
+                user = new User(users.Count, userCredentials.login, userCredentials.password, new List<Game>(), GenerateToken(), client, coins, permissionLevel);
             }
             else
             {
-                user = new User(users.Count, userCredentials.login, userCredentials.password, games, GenerateToken(), client, coins);
+                user = new User(users.Count, userCredentials.login, userCredentials.password, games, GenerateToken(), client, coins, permissionLevel);
             }
             
             //Mutex mtx = new Mutex();
@@ -1177,6 +1866,7 @@ namespace MStoreServer
             userData += "-name:" + user.userName + "\n";
             userData += "-password:" + user.password + "\n";
             userData += "-coins:" + user.coins.GetPrice(Price.Currency.coins).ToString() + "\n";
+            userData += "-permission:" + user.permissionLevel.id.ToString() + "\n";
             userData += "-games:" + "\n";
             for(int i = 0;i<user.games.Count;i++)
             {
@@ -1290,7 +1980,6 @@ namespace MStoreServer
         /// <returns></returns>
         public LoginStatus LogUser(NetworkEngine.Client client, out User user)
         {
-            Debug.Log("LogUser");
             user = null;
 
             while (true)
@@ -1298,7 +1987,6 @@ namespace MStoreServer
                 //client.ForceReceive();
                 //string command = client.ReadData(5);
                 string command = client.Receive_LowLevel(-2, false, false);
-                Debug.Log("Command: " + command);
                 if (command == "REGIS")
                 {
                     RegisterStatus registerStauts = RegisterUser(client, out user);
@@ -1349,13 +2037,11 @@ namespace MStoreServer
 
             if(user == null)
             {
-                Debug.Log("Client not registered");
                 return LoginStatus.notRegistered;
             }
 
             if(user.password == password)
             {
-                Debug.Log("Login successfull");
                 return LoginStatus.successfull;
             }
             else
@@ -1371,6 +2057,7 @@ namespace MStoreServer
         /// <param name="client"></param>
         private void AddClient_Thread(NetworkEngine.Client client)
         {
+            Debug.Log("New connection");
 
             User user = null;
             LoginStatus status = LoginStatus.notRegistered;
@@ -1398,7 +2085,102 @@ namespace MStoreServer
             client.dataReceivedFunction = ClientDataReceived;
 
             client.thread.Start();
-            Debug.Log("Client successfully added", ConsoleColor.Blue);
+            Debug.Log("Client logged", ConsoleColor.Blue);
+        }
+
+        public bool LoadPermissionsFromFile(string filePath)
+        {
+            groups = new List<Group>();
+
+            if(!File.Exists(filePath))
+            {
+                Debug.LogError("Cannot load permission from " + filePath + ", file doesn't exist");
+                return false;
+            }
+
+
+            string[] lines = MFile.ReadAllLines(filePath);
+
+            for(int i = 0;i<lines.Length;i++)
+            {
+                if(lines[i].StartsWith("default:"))
+                {
+                    lines[i] = lines[i].Remove(0, "default:".Length);
+                    int defId = 0;
+                    if(!int.TryParse(lines[i], out defId))
+                    {
+                        Debug.LogError("Cannot parse " + lines[i] + " to default level ID ( int )");
+                        return false;
+                    }
+                    defaultPermissionLevlID = defId;
+
+                    continue;
+                }
+
+                Group level = new Group(-1, "", false);
+
+                string workingStr = "";
+                //Name
+                lines[i] = MUtil.GetStringToSpecialCharAndDelete(lines[i], ';', out workingStr);
+
+                level.name = workingStr;
+
+                lines[i] = MUtil.GetStringToSpecialCharAndDelete(lines[i], ';', out workingStr);
+
+                int _id = 0;
+                //Id
+                if(!int.TryParse(workingStr, out _id))
+                {
+                    Debug.LogError("Cannot parse " + lines[i] + " to id ( int )");
+                    return false;
+                }
+
+                while(lines[i].Length != 0)
+                {
+                    lines[i] = MUtil.GetStringToSpecialCharAndDelete(lines[i], ';', out workingStr);
+                    if(workingStr == "admin")
+                    {
+                        level.isAdmin = true;
+                    }
+                }
+
+                level.id = _id;
+
+                groups.Add(level);
+
+               
+            }
+
+            return true;
+        }
+
+        private static bool workingOnVouchers = false;
+        public static void AddVoucher(Voucher voucher)
+        {
+            while(workingOnVouchers)
+            {
+                Thread.Sleep(10);
+            }
+
+            workingOnVouchers = true;
+
+            vouchers.Add(voucher);
+
+            workingOnVouchers = false;
+        }
+
+        public static void RemoveVoucher(Voucher voucher)
+        {
+            while(workingOnVouchers)
+            {
+                Thread.Sleep(10);
+            }
+
+            workingOnVouchers = true;
+
+            vouchers.Remove(voucher);
+
+            workingOnVouchers = false;
         }
 
         public bool LoadVouchersFromFile(string filePath)
@@ -1505,7 +2287,6 @@ namespace MStoreServer
                 int uses = 0;
                 if(lines[i].Length == 0)
                 {
-                    Debug.Log("Infinite uses");
                     uses = -1;
                 }
                 else
@@ -1516,9 +2297,7 @@ namespace MStoreServer
                         return false;
                     }
                 }
-
-                Debug.Log("Adding new voucher with code: " + code + " that adds " + coinsNumber + " coins and game with ID " + gameID + " with " + uses + " uses");
-                vouchers.Add(new Voucher(code, coinsNumber, gameID, uses));
+                AddVoucher(new Voucher(code, coinsNumber, gameID, uses));
             }
 
             return true;
@@ -1544,7 +2323,6 @@ namespace MStoreServer
                     FileInfo info = new FileInfo(__path);
                     games[i].downloadSize = info.Length;
 
-                    Debug.Log(games[i].name + " download size: " + games[i].downloadSize);
 
                     ZipArchive archive = ZipFile.Open(__path, ZipArchiveMode.Read);
 
@@ -1555,7 +2333,6 @@ namespace MStoreServer
                     }
 
                     games[i].diskSize = sizeOnDisk;
-                    Debug.Log(games[i].name + " disk size: " + games[i].diskSize);
                 }
             }
         }
@@ -1568,7 +2345,7 @@ namespace MStoreServer
                 NetworkEngine.WriteError("Users config file on path \"" + usersConfigFilePath + "\" doesn't exist, do You want to create new? ( Y - yes, N - no )");
                 //return false;
                 ConsoleKeyInfo key = Console.ReadKey();
-                if(key.Key == ConsoleKey.Y)
+                if (key.Key == ConsoleKey.Y)
                 {
                     FileStream stream = File.Create(usersConfigFilePath);
                     stream.Close();
@@ -1585,13 +2362,6 @@ namespace MStoreServer
 
             lines = MUtil.RemoveEmptyLines(lines);
 
-
-            Debug.Log("Lines:");
-            for(int i = 0;i<lines.Length;i++)
-            {
-                Debug.Log(lines[i]);
-            }
-
             int lastCat = -1;
 
             User lastUser = null;
@@ -1602,25 +2372,25 @@ namespace MStoreServer
                 switch (lines[i][0])
                 {
                     case '+':
-                        if(lines[i].Remove(0,1) != "user")
+                        if (lines[i].Remove(0, 1) != "user")
                         {
                             Debug.LogError("Error in line " + i + ", unknown command " + lines[i].Remove(0, 1));
                             return false;
                         }
-                        if(lastUser != null)
+                        if (lastUser != null)
                         {
-                            if(lastUser.userName == "")
+                            if (lastUser.userName == "")
                             {
                                 Debug.LogError("Cannot load userName in line " + i);
                                 return false;
                             }
-                            if(lastUser.password == "")
+                            if (lastUser.password == "")
                             {
                                 Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + i);
                                 return false;
                             }
-                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins));
-                            Debug.Log("Loaded user " + lastUser.userName);
+                            AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins), lastUser.permissionLevel);
+
                         }
                         lastUser = new User(-2, "", "", new List<Game>(), "");
                         lastCat = -1;
@@ -1632,25 +2402,19 @@ namespace MStoreServer
 
                         if (result)
                         {
-                            Debug.Log("Category: " + category);
-                            Debug.Log("Data: " + data);
-
-                            //lastCat = -1;
                             switch (category)
                             {
                                 case "name":
                                     lastUser.userName = data;
-                                    Debug.Log("New user username: " + lastUser.userName);
                                     break;
 
                                 case "password":
                                     lastUser.password = data;
-                                    Debug.Log("New user password: " + lastUser.password);
                                     break;
 
                                 case "coins":
                                     Int64 newCoinsValue = 0;
-                                    if(Int64.TryParse(data, out newCoinsValue))
+                                    if (Int64.TryParse(data, out newCoinsValue))
                                     {
                                         lastUser.coins = newCoinsValue;
                                         //lastUser.coins.SetPrice(newCoin)
@@ -1665,6 +2429,29 @@ namespace MStoreServer
                                 case "games":
                                     lastCat = 1;
                                     break;
+
+                                case "permission":
+                                case "group":
+                                case "permissionLevel":
+                                    {
+                                        int level = -1;
+                                        if(!int.TryParse(data, out level))
+                                        {
+                                            Debug.LogError("Cannot parse \"" + data + "\" to level ( int )");
+                                            return false;
+                                        }
+
+                                        Group gr = FindGroup(level);
+                                        if(gr == null)
+                                        {
+                                            Debug.LogError("Cannot find group with id " + level);
+                                            return false;
+                                        }
+
+                                        lastUser.permissionLevel = gr;
+
+                                        break;
+                                    }
 
                                 default:
                                     NetworkEngine.WriteError("Category " + category + " not found, error in file in line " + (i + 1).ToString());
@@ -1693,20 +2480,19 @@ namespace MStoreServer
                             //Games
                             case 1:
                                 long id = -5;
-                                if(!long.TryParse(lines[i], out id))
+                                if (!long.TryParse(lines[i], out id))
                                 {
                                     Debug.LogError("Cannot parse \"" + lines[i] + "\" to gameID ( long ) in line " + i);
                                     return false;
                                 }
                                 Game game = FindGame(id);
-                                if(game == null)
+                                if (game == null)
                                 {
                                     Debug.LogError("Cannot find game with id " + id + " in line " + i);
                                     return false;
                                 }
 
                                 lastUser.games.Add(game);
-                                Debug.Log("Added game " + game.name + " to user " + lastUser.userName);
 
                                 break;
                             default:
@@ -1734,8 +2520,8 @@ namespace MStoreServer
                     Debug.LogError("Cannot load user " + lastUser.userName + " password in line " + lines.Length);
                     return false;
                 }
-                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins));
-                Debug.Log("Loaded user " + lastUser.userName);
+                AddUser(new UserCredentials(lastUser.userName, lastUser.password), lastUser.socket, lastUser.games, (long)lastUser.coins.GetPrice(Price.Currency.coins), lastUser.permissionLevel);
+                //AddUser(lastUser, lastUser.socket);
             }
 
             return true;
@@ -1769,7 +2555,6 @@ namespace MStoreServer
                 {
                     case '+':
                         games.Add(new Game("", -games.Count - 1));
-                        Debug.Log("GAME ADDED");
                         lastCat = -1;
                         break;
                     case '-':
@@ -1780,7 +2565,7 @@ namespace MStoreServer
                         if(result)
                         {
                             lastCat = -1;
-                            switch (category)
+                            switch (category.ToLower())
                             {
                                 case "name":
                                 case "app":
@@ -1798,6 +2583,17 @@ namespace MStoreServer
                                         return false;
                                     }
                                     break;
+
+                                case "groupprice":
+                                    {
+                                        string wData = "";
+                                        //GroupID
+                                        data = MUtil.GetStringToSpecialCharAndDelete(data, ';', out wData);
+
+
+
+                                        break;
+                                    }
 
                                 case "path":
                                     games[games.Count - 1].path = data;
@@ -1929,7 +2725,7 @@ namespace MStoreServer
                 }
                 else
                 {
-                    Debug.Log("Error parsing " + line + " to port ( int )");
+                    Debug.LogError("Error parsing " + line + " to port ( int )");
                 }
             }
             else if (line.ToLower().StartsWith("downloadport="))
@@ -1965,6 +2761,31 @@ namespace MStoreServer
                 {
                     Debug.LogError("Invalid port format, cannot parse " + line + " to icons download port ( int )");
                 }
+            }
+            else if(line.ToLower().StartsWith("maxpacketsize="))
+            {
+                line = line.Remove(0, "maxpacketsize=".Length);
+
+                int _maxPacket = -1;
+
+                try
+                {
+                    _maxPacket = int.Parse(line);
+
+                    DownloadEngine.packetSize = _maxPacket;
+
+                    Debug.Log("Max packet size: " + DownloadEngine.packetSize);
+                }
+                catch(Exception)
+                {
+                    Debug.ConversionError(line, "_maxPacket", _maxPacket);
+                    return;
+                }
+            }
+            else
+            {
+                Debug.LogError("Config option: " + line + " not found");
+                return;
             }
         }
 
@@ -2010,7 +2831,6 @@ namespace MStoreServer
             }
 
             string file = File.ReadAllText(filePath);
-            //Debug.Log("File: " + file);
             if(file.Length == 0)
             {
                 Debug.LogError("Empty file");
@@ -2028,28 +2848,12 @@ namespace MStoreServer
                     ConsoleKeyInfo info = Console.ReadKey();
                     if (info.Key == ConsoleKey.Y)
                     {
-                        Debug.Log("\nEncrypting file...");
-
-                        /*List<byte[]> encryptedFileList = new List<byte[]>();
-
-                        for(int i = 0;i<lines.Length;i++)
-                        {
-                            encryptedFileList.Add(EncryptString(lines[i], lockFileKey, lockFileIV));
-                        }
-
-                        FileStream fs = File.Create(filePath);
-                        for(int i = 0;i< encryptedFileList.Count;i++)
-                        {
-                            fs.Write(encryptedFileList[i], 0, encryptedFileList[i].Length);
-                        }
-                        fs.Close();*/
+                        Debug.Log("\nEncrypting file " + file + "...");
 
                         string[] l = MUtil.StringToStringArray(file);
-                        //Debug.Log("l lenght: " + l.Length);
                         file = "";
                         for(int i = 1;i<l.Length - 1;i++)
                         {
-                            //Debug.Log("Adding " + l[i]);
                             file += l[i] + "\n";
                         }
                         file += l[l.Length - 1];
@@ -2072,10 +2876,6 @@ namespace MStoreServer
 
                 
             }
-            else
-            {
-                //Debug.Log("Decyrpting file...");
-            }
 
 
 
@@ -2083,16 +2883,9 @@ namespace MStoreServer
 
             string decryptedFile = MCrypt.DecryptByteArray(encryptedFile, MCrypt.lockFileKey, MCrypt.lockFileIV);
 
-            //Debug.Log("Decryption result: \n\n\"" + decryptedFile + "\"\n\n");
 
             //0 - key, 1 - IV
             string[] lines = MUtil.StringToStringArray(decryptedFile);
-
-            /*Debug.Log("Lines:");
-            for(int i = 0;i<lines.Length;i++)
-            {
-                Debug.Log(lines[i]);
-            }*/
 
             if(lines.Length != 2)
             {
@@ -2120,6 +2913,7 @@ namespace MStoreServer
 
             MCrypt.filesKey = key;
             MCrypt.filesIV = iv;
+
 
             return true;
         }
@@ -2193,21 +2987,26 @@ namespace MStoreServer
                 return;
             }
 
-            string[] files = { "games.conf", usersConfigDir, voucherConfigDir };
+            string[] files = {"games.conf", usersConfigDir, voucherConfigDir, "permissions.conf" };
             EncryptFilesIfNeeded(files);
             RemoveEmptyLinesFromFiles(files);
 
             //users = new List<User>();
             LoadConfig();
+
+            LoadPermissionsFromFile("permissions.conf");
+
             LoadGamesFromFile("games.conf");
 
             LoadUsersFromFile(usersConfigDir);
 
             LoadVouchersFromFile(voucherConfigDir);
 
-            DisplayGames();
+            
 
-            Debug.Log("Starting server on port " + port + "...");
+
+            Debug.Log("Starting server on port ", ConsoleColor.Yellow, false);
+            Debug.Log(port, ConsoleColor.Green, true);
             socket = new NetworkEngine(port);
             socket.addUserFunction = new NetworkEngine.NewClientFunction(AddClient);
 

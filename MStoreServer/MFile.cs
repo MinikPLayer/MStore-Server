@@ -43,7 +43,7 @@ namespace MStoreServer
                 return null;
             }
 
-            if(decrypt)
+            /*if(decrypt)
             {
                 //byte[] array = File.ReadAllBytes(path);
                 string line = File.ReadAllText(path);
@@ -60,7 +60,23 @@ namespace MStoreServer
             else
             {
                 return File.ReadAllText(path);
+            }*/
+
+            string[] lines = ReadAllLines(path, decrypt);
+            if(lines.Length == 0)
+            {
+                return "";
             }
+            string output = "";
+
+            for(int i = 0;i<lines.Length - 1;i++)
+            {
+                output += lines[i] + "\n";
+            }
+
+            output += lines[lines.Length - 1];
+
+            return output;
         }
 
         public static byte[] ReadAllBytes(string path, bool decrypt = true)

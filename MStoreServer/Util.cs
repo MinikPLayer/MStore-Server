@@ -6,6 +6,37 @@ namespace MStoreServer
 {
     public static class MUtil
     {
+        public static string GetStringToSpecialChar(string str, char specialChar)
+        {
+            string value = "";
+
+            for (int i = 0; i < str.Length; i++)
+            {
+                if (str[i] == specialChar) return value;
+                value += str[i];
+            }
+
+            return value;
+        }
+
+        /// <summary>
+        /// Returns string from special character ( without it )
+        /// </summary>
+        /// <param name="str"></param>
+        /// <param name="specialChar"></param>
+        /// <param name="strToSpecialChar"></param>
+        /// <returns></returns>
+        public static string GetStringToSpecialCharAndDelete(string str, char specialChar, out string strToSpecialChar)
+        {
+            strToSpecialChar = GetStringToSpecialChar(str, specialChar);
+
+            if(strToSpecialChar.Length >= str.Length)
+            {
+                return "";
+            }
+            return str.Remove(0, strToSpecialChar.Length + 1);
+        }
+
         public static bool AskUserYesNo(string action = "do this")
         {
             ConsoleColor orColor = Console.ForegroundColor;
@@ -39,10 +70,8 @@ namespace MStoreServer
             //List<string> linesList = new List<string>(lines);
             for(int i = 0;i< lines.Count;i++)
             {
-                Debug.Log("Checking " + i + ", it's " + lines[i].Length + " chars long");
                 if(lines[i].Length == 0)
                 {
-                    Debug.LogWarning("Removing at " + i);
                     lines.RemoveAt(i);
                     i--;
                     continue;
@@ -51,7 +80,6 @@ namespace MStoreServer
                 {
                     if(lines[i] == "\n" || lines[i] == "\r")
                     {
-                        Debug.LogWarning("Removing at " + i);
                         lines.RemoveAt(i);
                         i--;
                         continue;
@@ -66,9 +94,7 @@ namespace MStoreServer
 
         public static string[] RemoveEmptyLines(string[] lines)
         {
-            Debug.Log("Size before cutting : " + lines.Length);
             string[] lns = RemoveEmptyLines(new List<string>(lines)).ToArray();
-            Debug.Log("Size after cutting: " + lns.Length);
             return lns;
         }
 
@@ -80,7 +106,6 @@ namespace MStoreServer
             {
                 if (input[i] == '\n' || input[i] == '\r')
                 {
-                    Debug.Log("Actual line: \"" + actualLine + "\" lenght: " + actualLine.Length);
                     array.Add(actualLine);
 
 
@@ -94,7 +119,6 @@ namespace MStoreServer
             if (actualLine.Length != 0)
             {
                 array.Add(actualLine);
-                Debug.Log("Actual line: \"" + actualLine + "\" lenght: " + actualLine.Length);
             }
 
             return array.ToArray();

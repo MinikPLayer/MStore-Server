@@ -27,6 +27,8 @@ namespace MStoreServer
 
         public StoreServer.User user;
 
+        public static int packetSize = 32000; // 255 - default
+
         private void _SendFile(string filePath)
         {
             //string fileContent = File.ReadAllText(filePath);
@@ -49,68 +51,47 @@ namespace MStoreServer
 
 
 
-
-            byte[] fileContent = new byte[255];
-            for(int i = 0;i<255;i++)
+            
+            byte[] fileContent = new byte[packetSize];
+            /*for(int i = 0;i<255;i++)
             {
                 fileContent[i] = 124;
-            }
+            }*/
+
+            
 
             using (FileStream fs = File.OpenRead(filePath))
             {
                 var binaryReader = new BinaryReader(fs);
                 //fileContent = binaryReader.ReadBytes((int)fs.Length);
                 int count = 0;
-                while (fs.Position < fs.Length - 255)
-                {
 
-                    //byte[] content = binaryReader.ReadBytes(255);
-                    // DISABLED FOR DEBUGGING PURPOSES
-                    fileContent = binaryReader.ReadBytes(255);
+                while (fs.Position < fs.Length - packetSize)
+                {
+                    fileContent = binaryReader.ReadBytes(packetSize);
+
 
 
 
                     client.Send(fileContent, "", false);
-                    //Debug.Log("Sent " + fileContent.Length + " bytes");
                     count++;
                     if(count%500 == 0)
                     {
-                        Debug.Log("Sent " + (fs.Position * 100f / (float)fs.Length) + "%");
+
                     }
+
+                    
 
                     //Thread.Sleep(50);
                 }
 
                 // DISABLED FOR DEBUGGING PURPOSES
                 fileContent = binaryReader.ReadBytes((int)(fs.Length - fs.Position));
-                Debug.Log("Last packet size: " + fileContent.Length);
 
                 client.Send(fileContent, "", false);
 
                 Debug.Log("Sent " + fs.Position + " bytes");
             }
-
-            
-
-
-
-
-
-            /*Debug.Log("File content: ");
-
-            //string content = "";
-
-            for(int i = 0;i<fileContent.Length;i++)
-            {
-                //content += (char)fileContent[i];
-                Console.WriteLine(fileContent[i].ToString() + " - " + (char)fileContent[i]);
-            }*/
-
-            //Debug.Log(content);
-
-            //Debug.Log("Content size: " + fileContent.Length);
-
-            
 
             working = false;
         }
@@ -496,14 +477,9 @@ namespace MStoreServer
 
             NetworkEngine.Client client = new NetworkEngine.Client(listener.AcceptTcpClient(), false);
 
-            Debug.Log("Connection incoming");
-
             if(client != null)
             {
                 DownloadEngine downloadEngine = new DownloadEngine(client);
-
-
-                Debug.Log("Connetion established, trying to send file");
                 DownloadEngine.UploadStatus status = downloadEngine.SendFile(filePath);
                 switch (status)
                 {
